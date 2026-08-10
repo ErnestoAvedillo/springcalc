@@ -32,7 +32,12 @@ def _build_constant_geometry_spring():
     for key, value in std_spring_data.items():
         print(f"{key}: {value}")
     print("✅ Comparing CompressionSpringGeneral and CompressionSpring data:")
+    # spring_constant is excluded: CompressionSpringGeneral computes it over the
+    # full winding (no end-coil discount), while the legacy CompressionSpring
+    # still discounts inactive end coils, so the two are expected to differ.
     for key, value in spring_data.items():
+        if key == 'spring_constant':
+            continue
         std_value = std_spring_data[key]
         print(f"{key}: {value}, std: {std_value}")
         if isinstance(value, Quantity):

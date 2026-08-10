@@ -6,15 +6,15 @@ import traceback
 import numpy as np
 from pint import Quantity
 import matplotlib
-matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 from ..pymodels.units import ureg
-from .constants import WAHL_FACTOR_CONSTANTS, COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
+from .constants import WAHL_FACTOR_CONSTANTS
 from ..pymodels.positions import LinearPositionsTable
 from .generic_lineal import VariableLinealSpring
 from .goodman import GoodmanData, GoodmanAnalyzer
 from .plotting import interactive_backend
+matplotlib.use('Agg')
 
 COMPRESSION = 1
 
@@ -27,46 +27,15 @@ class CompressionSpringGeneral(VariableLinealSpring):
     position_stress: Optional[Quantity] = 0.0 * ureg.megapascal
     wahl_factor: float = 0.0
     wahl_factor_category: Optional[str] = None
-    nr_active_coils: float = 0.0
     number_cycles: int = 1_000_000
-
-    def calculate_active_coils(self) -> float:
-        """
-        Calculate the number of active coils, discounting the end coils that
-        are ground/squared flat and don't contribute to deflection.
-        """
-        if self.type_conforming == FORMING_TYPES[1]:  # cold formed
-            self.nr_active_coils = self.nr_coils - 2
-            if self.type_of_end in [COMPRESSION_SPRING_END_TYPES[3], COMPRESSION_SPRING_END_TYPES[4]]:  # unground
-                self.nr_active_coils -= 1.5
-        else:  # hot formed
-            self.nr_active_coils = self.nr_coils - 1.5
-        if self.type_of_end in [COMPRESSION_SPRING_END_TYPES[1], COMPRESSION_SPRING_END_TYPES[2]]:  # ground
-            self.nr_active_coils -= 0.3
-        else:
-            self.nr_active_coils -= 1.1
-        return self.nr_active_coils
-
-    def _get_active_theta_range(self) -> tuple:
-        """
-        Narrow the active winding range to exclude the non-deforming end
-        coils, split evenly between both ends of the spring.
-        """
-        if self.theta_max == 0:
-            self.calculate_theta_max()
-        self.calculate_active_coils()
-        inactive_coils = max(self.nr_coils - self.nr_active_coils, 0.0)
-        theta_margin = (inactive_coils / 2) * 2 * pi
-        return theta_margin, self.theta_max - theta_margin
 
     def calculate_spring_properties(self, num_points: int = 500) -> dict:
         """
         Calculate all derived properties, including the compression-specific
-        ones (active coils, solid length, representative Wahl factor) that
-        CompressionSpring also reports.
+        ones (solid length, representative Wahl factor) that CompressionSpring
+        also reports.
         """
         super().calculate_spring_properties(num_points=num_points)
-        self.calculate_active_coils()
         self.calculate_wahl_factor_at_position(self.free_length / 2)
         self.calculate_solid_length()
         return self.get_spring_data()
@@ -84,7 +53,6 @@ class CompressionSpringGeneral(VariableLinealSpring):
             "mean_diameter": self.f_mean_diameter(self.free_length / 2),
             "free_length": self.free_length,
             "nr_coils": self.nr_coils,
-            "nr_active_coils": self.nr_active_coils,
             "spring_constant": self.spring_constant,
             "spring_index": self.spring_index,
             "wahl_factor": self.wahl_factor,
@@ -104,7 +72,7 @@ class CompressionSpringGeneral(VariableLinealSpring):
         # If the spring nests flat (very different diameters): solid_length = wire_diameter
         # If it's a standard compression spring where coils collide: solid_length = nr_coils * wire_diameter
         # Add a basic check for "nesting" or "telescoping"
-        H_val = self.free_length.to('mm').magnitude
+        # H_val = self.free_length.to('mm').magnitude
         D_start = self.f_mean_diameter(0 * ureg.mm).to('mm').magnitude
         D_end = self.f_mean_diameter(self.free_length).to('mm').magnitude
         d_wire = self.wire_diameter.to('mm').magnitude
@@ -120,11 +88,24 @@ class CompressionSpringGeneral(VariableLinealSpring):
         return self.solid_length
 
     def calculate_load_at_position(self, length: Quantity, spring_class: int = COMPRESSION) -> Quantity:
-        """Calculate the load at a given position using the overall spring constant."""
-        if self.spring_constant == 0:
-            self.calculate_spring_constant()
+        """Calculate the load at a given position from the contact-aware progressive
+        compression simulation, rather than assuming a single constant stiffness
+        across the whole travel. This captures the stiffening caused by coil-to-coil
+        collisions and by coils bottoming out against the floor or the moving plate
+        as the position approaches solid height.
+        """
         self.position_length = length
-        self.position_load = spring_class * self.spring_constant * (self.free_length - self.position_length)
+        travel = self.free_length - self.position_length
+
+        deflection_history, force_history, _ = self.simulate_progressive_compression(
+            max_deflection=self.free_length, steps=500,
+        )
+        force_n = np.interp(
+            travel.to('mm').magnitude,
+            deflection_history.to('mm').magnitude,
+            force_history.to('N').magnitude,
+        )
+        self.position_load = spring_class * force_n * ureg.N
         self.calculate_stress_at_position(self.position_load)
         return self.position_load
 
@@ -255,6 +236,21 @@ class CompressionSpringGeneral(VariableLinealSpring):
             print(f"Error creating Goodman diagram in CompressionSpringGeneral: {e}\n{tb}")
             return {'error': str(e), 'traceback': tb}
 
+    # Resolution used for the load curve underlying both graphs below. Matches
+    # calculate_load_at_position's call so the two share the same simulate_
+    # progressive_compression() cache entry instead of recomputing it.
+    _LOAD_CURVE_STEPS = 500
+
+    def _get_load_curve(self):
+        """Dense (travel_mm, force_n) arrays spanning the full compressible
+        travel, from the contact-aware progressive simulation (coil-to-coil,
+        floor, and top-plate contact), not just the handful of manually added
+        load positions."""
+        deflection_history, force_history, _ = self.simulate_progressive_compression(
+            max_deflection=self.free_length, steps=self._LOAD_CURVE_STEPS,
+        )
+        return deflection_history.to('mm').magnitude, force_history.to('N').magnitude
+
     def get_forces_vs_position_graph(self, show=False):
         def _to_mm_float(value):
             return float(value.to('mm').magnitude) if isinstance(value, Quantity) else float(value)
@@ -262,12 +258,18 @@ class CompressionSpringGeneral(VariableLinealSpring):
         def _to_n_float(value):
             return float(value.to('N').magnitude) if isinstance(value, Quantity) else float(value)
 
+        travel_mm, force_n = self._get_load_curve()
+        position_mm = self.free_length.to('mm').magnitude - travel_mm
+
         positions_table = self.positions.positions
-        positions = [_to_mm_float(pc.position) for pc in positions_table]
-        loads = [_to_n_float(pc.load) for pc in positions_table]
+        marked_positions = [_to_mm_float(pc.position) for pc in positions_table]
+        marked_loads = [_to_n_float(pc.load) for pc in positions_table]
         with interactive_backend(show):
             plt.figure()
-            plt.plot(positions, loads, marker='o')
+            plt.plot(position_mm, force_n)
+            if marked_positions:
+                plt.plot(marked_positions, marked_loads, 'o', color='tab:red', label='Load positions')
+                plt.legend()
             plt.title('Load vs Position Curve')
             plt.xlabel('Position (mm)')
             plt.ylabel('Load (N)')
@@ -291,12 +293,17 @@ class CompressionSpringGeneral(VariableLinealSpring):
         def _to_n_float(value):
             return float(value.to('N').magnitude) if isinstance(value, Quantity) else float(value)
 
+        travel_mm, force_n = self._get_load_curve()
+
         positions_table = self.positions.positions
-        travels = [_to_mm_float(pc.travel) for pc in positions_table]
-        loads = [_to_n_float(pc.load) for pc in positions_table]
+        marked_travels = [_to_mm_float(pc.travel) for pc in positions_table]
+        marked_loads = [_to_n_float(pc.load) for pc in positions_table]
         with interactive_backend(show):
             plt.figure()
-            plt.plot(travels, loads, marker='o')
+            plt.plot(travel_mm, force_n)
+            if marked_travels:
+                plt.plot(marked_travels, marked_loads, 'o', color='tab:red', label='Load positions')
+                plt.legend()
             plt.title('Load vs Travel Curve')
             plt.xlabel('Travel (mm)')
             plt.ylabel('Load (N)')

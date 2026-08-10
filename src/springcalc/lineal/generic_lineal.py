@@ -1,15 +1,10 @@
 from typing import Callable, Optional
 from pint import Quantity
 import numpy as np
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, PrivateAttr, field_validator
 from ..pymodels.units import ureg
-from .constants import WAHL_FACTOR_CONSTANTS, COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
+from .constants import COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
 from ..pymodels.wire_characteristics import WireCharacteristics
-from typing import Optional
-from pint import Quantity
-from ..pymodels.units import ureg
-from pydantic import field_validator, ConfigDict
-import numpy as np
 from scipy.integrate import quad, cumulative_trapezoid
 from scipy.optimize import fsolve
 
@@ -22,7 +17,6 @@ class VariableLinealSpring(WireCharacteristics):
     # --- Base parameters of the generic spring ---
     free_length: Quantity = 0.0 * ureg.mm
     nr_coils: float = 0.0
-    nr_active_coils: float = 0.0
     shot_peening: bool = False
     coating: Optional[str] = None
     spring_index: float = 0.0  # Note: for variable geometries this index varies locally.
@@ -40,6 +34,14 @@ class VariableLinealSpring(WireCharacteristics):
     type_of_end: str = COMPRESSION_SPRING_END_TYPES[1]  # open_ground by default
     type_conforming: str = FORMING_TYPES[1]  # cold_formed by default
     theta_max: float = 0.0  # Total helix rotation angle (radians)
+
+    # Cache of the last simulate_progressive_compression() call: {"key": (...),
+    # "result": (...)}. Callers (report graphs, position lookups) tend to ask
+    # for the same (max_deflection, steps, num_points) repeatedly within one
+    # report, and the simulation is expensive (a root-solve per point plus a
+    # per-step contact scan), so avoid recomputing it every time. Invalidated
+    # by set_geometry whenever the underlying geometry changes.
+    _progressive_compression_cache: Optional[dict] = PrivateAttr(default=None)
 
     # --- Your validators stay the same (trimmed here for brevity) ---
     @field_validator('free_length', mode='before')
@@ -92,9 +94,9 @@ class VariableLinealSpring(WireCharacteristics):
         # if this spring instance is reconfigured and reused).
         self.theta_max = 0.0
         self.nr_coils = 0.0
-        self.nr_active_coils = 0.0
         self.spring_constant = 0.0 * ureg.N / ureg.mm
         self.wire_length = 0.0 * ureg.mm
+        self._progressive_compression_cache = None
 
     def establish_geometrical_function(self,
                                        func_D: Callable[[Quantity], Quantity],
@@ -182,7 +184,6 @@ class VariableLinealSpring(WireCharacteristics):
 
         return thetas, zs
 
-
     def calculate_wire_length(self, num_points=500) -> Quantity:
         """Calculate the wire length by integrating the arc-length differential (ds)"""
         thetas, zs = self.get_h_theta_development(num_points)
@@ -209,25 +210,14 @@ class VariableLinealSpring(WireCharacteristics):
         self.wire_length = L_mm * ureg.mm
         return self.wire_length
 
-
-
-    def _get_active_theta_range(self) -> tuple:
-        """
-        Angular range (radians) over which coils actively deform.
-        Defaults to the full winding; subclasses may narrow it to exclude
-        non-deforming end coils (e.g. ground/squared compression spring ends).
-        """
-        if self.theta_max == 0:
-            self.calculate_theta_max()
-        return 0.0, self.theta_max
-
     def calculate_spring_constant(self, num_points=500) -> Quantity:
         """
         Calculate the equivalent spring stiffness (K) considering the coils in series.
         1/K = integral_0^theta_max [ 8 * D(theta)^3 / (G * d^4 * 2*pi) ] dtheta
         """
-        theta_start, theta_end = self._get_active_theta_range()
-        thetas, zs = self.get_h_theta_development(num_points, theta_start=theta_start, theta_end=theta_end)
+        if self.theta_max == 0:
+            self.calculate_theta_max()
+        thetas, zs = self.get_h_theta_development(num_points, theta_start=0.0, theta_end=self.theta_max)
         Ds = np.array([self.f_mean_diameter(z * ureg.mm).to('mm').magnitude for z in zs])
 
         d_val = self.wire_diameter.to('mm').magnitude
@@ -271,8 +261,10 @@ class VariableLinealSpring(WireCharacteristics):
             "coating": self.coating,
         }
 
-    def simulate_progressive_compression(self, max_deflection: Quantity, steps: int = 100, num_points: int = 500,
-                                          capture_geometry: bool = False):
+    def simulate_progressive_compression(self, max_deflection: Quantity,
+                                         steps: int = 100,
+                                         num_points: int = 500,
+                                         capture_geometry: bool = False):
         """
         Simulates step-by-step compression accounting for oblique contact between coils.
         Returns the force vs. deflection curve and the evolution of the instantaneous stiffness.
@@ -293,9 +285,18 @@ class VariableLinealSpring(WireCharacteristics):
                 steps since f_mean_diameter is evaluated at each point's free-state
                 (undeformed) position, not its instantaneous height.
         """
-        # 1. Get the initial free-state (unloaded) trajectory
-        theta_start, theta_end = self._get_active_theta_range()
-        thetas, zs_free = self.get_h_theta_development(num_points, theta_start=theta_start, theta_end=theta_end)
+        cache_key = (round(max_deflection.to('mm').magnitude, 9), steps, num_points, capture_geometry)
+        cached = self._progressive_compression_cache
+        if cached is not None and cached["key"] == cache_key:
+            return cached["result"]
+
+        # 1. Get the initial free-state (unloaded) trajectory, spanning the
+        # complete winding: end coils are not excluded, so the geometry
+        # captured here (and the animation built from it) renders the full
+        # spring from z=0.
+        if self.theta_max == 0:
+            self.calculate_theta_max()
+        thetas, zs_free = self.get_h_theta_development(num_points, theta_start=0.0, theta_end=self.theta_max)
         Ds = np.array([self.f_mean_diameter(z * ureg.mm).to('mm').magnitude for z in zs_free])
         radii = Ds / 2.0
 
@@ -314,7 +315,7 @@ class VariableLinealSpring(WireCharacteristics):
         points_per_turn = int(round((2 * np.pi) / dtheta))
 
         # Initialize the accumulated force and deformation
-        current_force = 0.0 # Newtons
+        current_force = 0.0  # Newtons
         # Deformation of each point along the z axis
         delta_y = np.zeros_like(zs_free)
 
@@ -348,9 +349,47 @@ class VariableLinealSpring(WireCharacteristics):
                         # If they collide, both sections and everything in between are deactivated
                         is_active[i:i_sup+1] = 0.0
                 else:
-                    # If delta_R >= d, there is telescoping. No direct collision above,
-                    # but we need to watch whether it reaches the spring's floor plane once fully flattened.
+                    # If delta_R >= d, there is telescoping: the coils nest inside one
+                    # another instead of colliding directly. Nothing above stops that
+                    # section from deforming, so it's handled by the floor/top-plate
+                    # contact check below instead.
                     pass
+
+            # --- FLOOR CONTACT DETECTION ---
+            # The spring rests on a fixed base at z = 0. In a variable-pitch/diameter
+            # (conical) spring, an interior point can sink faster than its neighbours
+            # and reach the floor before the base anchor's own neighbourhood does --
+            # that point has nowhere left to go and must lock flat, same as an oblique
+            # coil-on-coil collision.
+            #
+            # NOTE: a symmetric check against the moving top plate was tried here
+            # (locking any point whose height reached or exceeded the last point's,
+            # i.e. z_actual[-1]) and removed: it's unsound once an interior span has
+            # already locked via coil-on-coil collision. A locked span's flexibility
+            # goes to 0, so cumulative_trapezoid stops advancing across it and it
+            # goes *nearly* stationary -- it does not get carried down as a rigid
+            # unit by the points above it the way a real jammed stack would. Meanwhile
+            # the last point's height is, by construction (see the cumulative_
+            # deformation comment below), always forced down by exactly one
+            # deflection_step per step regardless of any locking elsewhere. Once an
+            # interior span is nearly stationary while the last point relentlessly
+            # keeps dropping, the last point's height *will* eventually fall below
+            # the stalled span -- a false "poking through the plate" reading, not a
+            # real one. Locking those points on that basis only shrinks total_flex
+            # further, which concentrates the remaining deflection increment onto an
+            # ever-smaller sliver and drives the last point down even faster: a
+            # feedback loop that was observed to collapse a spring to a fraction of
+            # its true stiffening deflection. Properly modeling top-plate contact
+            # would require carrying locked spans down as rigid bodies (translating
+            # with whatever is directly above them), not just zeroing their local
+            # flexibility -- a bigger change than a boundary check.
+            z_actual = zs_free - delta_y
+            touches_floor = z_actual <= 0.0
+            # The base anchor point itself *defines* the floor position (it's always
+            # exactly 0 there for the unmargined case), so comparing it against
+            # itself is tautological -- exclude it.
+            touches_floor[0] = False
+            is_active[touches_floor] = 0.0
 
             # --- INSTANTANEOUS STIFFNESS CALCULATION (K_inst) ---
             # Local differential flexibility: if not active, its flexibility is 0 (infinite stiffness)
@@ -391,18 +430,24 @@ class VariableLinealSpring(WireCharacteristics):
             force_history.append(current_force)
             stiffness_history.append(K_inst)
             if capture_geometry:
-                z_history.append(zs_free - delta_y)
+                # Clamp to 0: a point can cross the floor within the same step that
+                # locks it (it's deactivated for the *next* step's deformation), so
+                # without this its last recorded position could dip slightly negative.
+                z_history.append(np.maximum(zs_free - delta_y, 0.0))
 
             if K_inst == float('inf'):
                 # If the spring is fully locked, end the simulation
                 break
 
         if capture_geometry:
-            return (np.array(deflection_history) * ureg.mm,
-                    np.array(force_history) * ureg.N,
-                    np.array(stiffness_history) * (ureg.N / ureg.mm),
-                    {"thetas": thetas, "z_history": z_history})
+            result = (np.array(deflection_history) * ureg.mm,
+                      np.array(force_history) * ureg.N,
+                      np.array(stiffness_history) * (ureg.N / ureg.mm),
+                      {"thetas": thetas, "z_history": z_history})
+        else:
+            result = (np.array(deflection_history) * ureg.mm,
+                      np.array(force_history) * ureg.N,
+                      np.array(stiffness_history) * (ureg.N / ureg.mm))
 
-        return (np.array(deflection_history) * ureg.mm,
-                np.array(force_history) * ureg.N,
-                np.array(stiffness_history) * (ureg.N / ureg.mm))
+        self._progressive_compression_cache = {"key": cache_key, "result": result}
+        return result
