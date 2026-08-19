@@ -136,6 +136,11 @@ class Material(BaseModel):
         """Check whether a material is already registered in materials.csv"""
         return material_name in get_available_materials()
 
+    @classmethod
+    def list_available_materials(cls) -> List[str]:
+        """Get the list of available material names"""
+        return get_available_materials()
+
     @staticmethod
     def _to_magnitude(value: Union[str, float, int, Quantity],
                       unit: Optional[str]) -> float:

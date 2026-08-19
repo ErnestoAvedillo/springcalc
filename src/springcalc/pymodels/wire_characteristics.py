@@ -14,6 +14,16 @@ def _diameter_to_mm_value(wire_diameter) -> float:
         return float(wire_diameter)
     return float(ureg.Quantity(wire_diameter).to('mm').magnitude)
 
+
+def get_standard_wire_diameters() -> list:
+    """Return the standard wire diameter series (mm) listed in DIAMETRO_TOLERANCIAS.csv."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    material_dir = os.path.join(os.path.dirname(current_dir), 'material')
+    file = os.path.join(material_dir, "DIAMETRO_TOLERANCIAS.csv")
+    df = read_csv(file)
+    return sorted(float(d) for d in df['diameter'])
+
+
 def get_wire_tolerance(wire_diameter: float) -> float:
     """Get the wire diameter tolerance based on the diameter"""
     current_dir = os.path.dirname(os.path.abspath(__file__))

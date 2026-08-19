@@ -100,6 +100,7 @@ and auto-fills any field you don't pass explicitly.
 | `.poisson_coef` | Poisson's ratio (dimensionless). |
 | `.RMa_file` | Name of the CSV (in `material/`) with tensile-strength ranges by wire diameter. |
 | `get_available_materials()` | Module-level function: list of valid `material_name` values. |
+| `Material.list_available_materials()` | Classmethod: list of valid `material_name` values (same as `get_available_materials()`). |
 | `Material.material_exists(material_name)` | Classmethod: whether a material is already registered. |
 | `Material.create_material(material_name, young_modulus, shear_modulus, elastic_limit_factor, poisson_coef, description="", RMa_file=None, RMa_data=None, overwrite=False)` | Classmethod: register a new material in `materials.csv` (and optionally its `RMa_file` table) and return it. Raises `ValueError` if the name already exists, unless `overwrite=True`. |
 
