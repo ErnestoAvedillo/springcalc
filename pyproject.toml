@@ -63,6 +63,17 @@ build-backend = "hatchling.build"
 # though factor_f_coeffs.json is tracked in git.
 packages = ["src/springcalc"]
 artifacts = ["src/springcalc/regresiones/factor_f/factor_f_coeffs.json"]
+# inverse_calc is work-in-progress and not ready to ship.
+exclude = ["src/springcalc/inverse_calc"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "src/tmp",
+    "src/springcalc/inverse_calc",
+    "tests/test_conical_comp_inv.py",
+    "tests/test_conical_curve_comp_inv.py",
+    "tests/test_lineal_comp_inv.py",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
