@@ -114,7 +114,7 @@ def test_calculate_spring(material:Material):
                        length2=pos2,
                        force1=load1,
                        force2=load2,
-                       security_factor=2)
+                       security_factor=1.5)
     designer = CompressionSpringInverseDesigner(requirements=req)
     best_spring = designer.design()
     report = SpringPDFReport(spring=best_spring.spring,
