@@ -5,7 +5,8 @@ from springcalc.inverse_calc.lineal_comp_inv_claude import (
     Requirements,
 )
 from springcalc.pymodels.material import Material
-
+from springcalc.pymodels.units import ureg
+from springcalc.report.pdf_report import SpringPDFReport
 
 @pytest.fixture
 def material():
@@ -103,6 +104,24 @@ def test_no_valid_candidate_raises(material):
         designer.design()
 
 
+def test_calculate_spring(material:Material):
+    load1 = 400 * ureg.N
+    load2 = 40 * ureg.N
+    pos1 = 65 * ureg.mm
+    pos2 = 120 * ureg.mm
+    req = Requirements(material=material,
+                       length1=pos1,
+                       length2=pos2,
+                       force1=load1,
+                       force2=load2,
+                       security_factor=2)
+    designer = CompressionSpringInverseDesigner(requirements=req)
+    best_spring = designer.design()
+    report = SpringPDFReport(spring=best_spring.spring,
+                             title="Best spring found")
+    report.build(output_path="test_report.pdf")
+
+
 if __name__ == "__main__":
     mat = Material(material_name="SL")
     test_design_matches_target_spring_constant_exactly(mat)
@@ -112,3 +131,4 @@ if __name__ == "__main__":
     test_design_returns_geometry_that_does_not_bind_before_the_shortest_length(mat)
     test_unreachable_safety_factor_returns_closest_achievable(mat)
     print("All lineal_comp_inv_claude tests passed.")
+    test_calculate_spring(material=mat)

@@ -6,7 +6,9 @@ Main public API:
     - GoodmanData, GoodmanAnalyzer, Goodman: fatigue analysis (Goodman diagram).
 """
 
-from springcalc.lineal.compresion import CompressionSpring
+from springcalc.lineal.compresion import (CompressionSpring,
+                                          FORMING_TYPES,
+                                          COMPRESSION_SPRING_END_TYPES)
 from springcalc.lineal.generic_compression import CompressionSpringGeneral
 from springcalc.lineal.extension import ExtensionSpring
 from springcalc.lineal.torsion import TorsionSpring
@@ -27,7 +29,12 @@ from springcalc.report import SpringPDFReport
 from springcalc.pymodels.units import ureg
 from springcalc.lineal.plotting import interactive_backend
 from importlib.metadata import version as _version
-
+from springcalc.inverse_calc.lineal_comp_inv_claude import (
+    CompressionSpringInverseDesigner
+)
+from springcalc.inverse_calc.conical_comp_inv_claude import (
+    ConicalCompressionSpringInverseDesigner,
+)
 __version__ = _version("springcalc")
 
 __all__ = [
@@ -54,5 +61,7 @@ __all__ = [
     "SpringPDFReport",
     "ureg",
     "interactive_backend",
+    "CompressionSpringInverseDesigner",
+    "ConicalCompressionSpringInverseDesigner",
     "__version__",
 ]

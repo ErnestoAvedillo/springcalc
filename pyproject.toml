@@ -1,6 +1,6 @@
 [project]
 name = "springcalc"
-version = "0.1.13"
+version = "0.1.17"
 description = "Spring calculation library: compression, extension, and torsion."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,9 +26,10 @@ dependencies = [
     "pandas>=2.2",
     "pint>=0.24",
     "pydantic>=2.13.4",
+    "pytest>=9.1.1",
     "reportlab>=4.0",
     "scipy>=1.14",
-    "twine>=6.2.0",
+    "twine>=7.0.0",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +40,7 @@ dev = [
 ]
 publish = [
     "build>=1.5.0",
-    "twine>=6.2.0",
+    "twine>=7.0.0",
 ]
 # Only needed to run scripts/regresiones/*, which regenerate the plain-number
 # JSON coefficients shipped in the package. Not required at runtime.
