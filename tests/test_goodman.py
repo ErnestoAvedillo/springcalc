@@ -22,7 +22,7 @@ def test_goodman():
 
     # 2. Option A: use the new architecture (recommended)
     print("\n--- Method 1: New architecture ---")
-    data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=1e3)
+    data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=1e5)
     analyzer = GoodmanAnalyzer(data)
 
     # Define the operating point
@@ -88,7 +88,7 @@ def test_comparacion_materiales():
     for mat_name in materiales:
         try:
             material = Material(material_name=mat_name)
-            data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=1e3)
+            data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=1e4)
             analyzer = GoodmanAnalyzer(data)
             sf = analyzer.calculate_safety_factor(sigma_max, sigma_min)
 
@@ -108,7 +108,7 @@ def test_factorf():
     diameters = pd['diameter'].values
     valores_sf =[]
     for diameter in diameters:
-        data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=1001)
+        data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=10000)
         analyzer = GoodmanAnalyzer(data)
         valores_sf.append(analyzer.Ssf)
         print(f"Diameter: {diameter:.2f} mm → Sf: {analyzer.Ssf:.1f} MPa")
@@ -146,6 +146,7 @@ def test_factorf():
     plt.show()
 
 if __name__ == "__main__":
-    test_goodman()
+    # test_goodman()
     # test_comparacion_materiales()
-    # test_factorf()
+    test_factorf()
+    input("Press enter...")

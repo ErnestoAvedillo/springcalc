@@ -51,7 +51,8 @@ class GoodmanAnalyzer:
 
         # 2. Maximum shear strength (Ssu) - approximated as 0.75 * RMa_min for steels
         self.Ssu = 0.67 * self.Sut
-
+        # 3. Torsional yield strength (Ssy ≈ 0.45 * Sut to 0.56 * Sut)
+        self.Ssy = 0.45 * self.Sut
         # 4. Uncorrected shear fatigue limit (Sse')
         # For steel springs, Sse' ≈ 0.5 * Sut is often used for infinite life
         self.Sse_prime = self.wire_char.material.elastic_limit_factor * self.Sut
@@ -67,7 +68,13 @@ class GoodmanAnalyzer:
 
         # size factor
         if self.data.load_type in ["torsion", "flexion"]:
-            self.k_b = 0.879 * (self.data.diameter / 25.4)**(-0.107)
+            # Shigley size factor formula using diameter in mm (2.79 mm <= d <= 51 mm)
+            if 2.79 <= self.data.diameter <= 51:
+                self.k_b = 1.24 * (self.data.diameter ** -0.107)
+            elif self.data.diameter > 51:
+                self.k_b = 1.51 * (self.data.diameter ** -0.157)
+            else:
+                self.k_b = 1.0
         else:
             self.k_b = 1
 
@@ -77,31 +84,29 @@ class GoodmanAnalyzer:
         elif self.data.load_type == "axial":
             self.k_c = 0.85
         else:
-            self.k_c = 0.59
+            self.k_c = 1.0
 
         # temperature factor
         self.k_d = 1.0
         # reliability factor
         self.k_e = 1.0
         # fatigue factor
+        # Apply all Marin modification factors to the uncorrected endurance limit Sse'
+        self.Sse = self.k_a * self.k_b * self.k_c * self.k_d * self.k_e * self.Sse_prime
         factor_f_model = ModelFactorF()
         self.factor_f = factor_f_model.predict(self.Ssu)
         if self.data.cycles <= 1e3:
-            self.Ssf_prime = self.Sut * self.data.cycles**(log10(self.factor_f)/3)  # Approximation for low cycle counts
+            # Low-cycle fatigue strength approximation
+            self.Ssf = self.Sut * (self.data.cycles ** (log10(self.factor_f) / 3))
+        elif self.data.cycles >= 1e6:
+            # Infinite life region
+            self.Ssf = self.Sse
         else:
-            if self.data.cycles > 1e6:
-                cycles = 1e6  # Cap at 1 million cycles for the prediction
-            else:
-                cycles = self.data.cycles
-            a = (self.factor_f  * self.Sut)**2 /  self.Sse_prime
-            b = -log10(self.factor_f  * self.Sut / self.Sse_prime) / 3
-            self.Ssf_prime = a * cycles**b
-        # Corrected fatigue limit (Sse)
-        # self.Sse = self.k_a * self.k_b * self.k_c * self.k_d * self.k_e *self.Sse_prime
-        self.Sse = self.Sse_prime
-        # Corrected shear fatigue limit (Ssf)
-        self.Ssf = self.k_a * self.k_b * self.k_c * self.k_d * self.k_e * self.Ssf_prime
-
+            # Finite-life region (10^3 < N < 10^6 cycles) using corrected endurance limit (Sse)
+            # S_f = a * N^b, where S_f(10^3) = f * Sut and S_f(10^6) = Sse
+            a = ((self.factor_f * self.Sut) ** 2) / self.Sse
+            b = -log10((self.factor_f * self.Sut) / self.Sse) / 3
+            self.Ssf = a * (self.data.cycles ** b)
     @staticmethod
     def _to_mpa_float(value) -> float:
         if isinstance(value, Quantity):
@@ -126,16 +131,36 @@ class GoodmanAnalyzer:
         with interactive_backend(show_plot):
             fig, ax = plt.subplots(figsize=(10, 8))
 
-            # Goodman diagram coordinates
-            V1 = (self.Sse - self.Ssf) / (self.Ssu - self.Ssf) * self.Ssu
-            Sv1 = self.Ssu - (self.Ssu - V1) * (self.Ssu + self.Ssf) / self.Ssu
+            # Effective fatigue strength Sn capped at ultimate tensile strength Sut
+            raw_sn = self.Ssf if self.data.cycles < 1e6 else self.Sse
+            Sn = min(raw_sn, self.Sut)
 
-            # Diagram lines
-            goodman_x = [0, V1, self.Sse, V1, 0]
-            goodman_y = [self.Ssf, self.Sse, self.Sse, Sv1, -self.Ssf]
+            # Intersection point calculation bounded to non-negative values
+            if Sn >= self.Ssy:
+                sm_yield = 0.0
+            else:
+                denom = 1.0 - (Sn / self.Sut) if self.Sut != Sn else 1e-6
+                sm_yield = max(0.0, min((self.Ssy - Sn) / denom, self.Ssy))
 
-            ax.plot(goodman_x, goodman_y, 'b-', linewidth=2, label='Goodman envelope')
-            ax.fill(goodman_x, goodman_y, alpha=0.3, color='lightblue', label='Safe region')
+            # Upper boundary line (Max. stress)
+            max_line_x = [0, sm_yield, self.Ssy]
+            max_line_y = [min(Sn, self.Ssy), self.Ssy, self.Ssy]
+
+            # Lower boundary line (Min. stress)
+            min_line_x = [0, sm_yield, self.Ssy]
+            min_line_y = [-min(Sn, self.Ssy), 2 * sm_yield - self.Ssy, self.Ssy]
+
+            # Plot boundaries
+            ax.plot(max_line_x, max_line_y, 'b-', linewidth=2, label='Max stress boundary')
+            ax.plot(min_line_x, min_line_y, 'b-', linewidth=2, label='Min stress boundary')
+
+            # Fill safe region
+            envelope_x = max_line_x + min_line_x[::-1]
+            envelope_y = max_line_y + min_line_y[::-1]
+            ax.fill(envelope_x, envelope_y, alpha=0.25, color='lightblue', label='Safe region')
+
+            # Midrange reference line (45 degrees)
+            ax.plot([0, self.Ssy], [0, self.Ssy], 'k--', linewidth=1, alpha=0.7, label='Midrange line (45°)')
 
             # Operating point
             mean_tension = (sigma_max + sigma_min) / 2
@@ -161,8 +186,9 @@ class GoodmanAnalyzer:
         k_c = {self.k_c:.3}
         Sut = {self.Ssu:.1f} MPa
         Se = {self.Sse:.1f} MPa
+        Sy = {self.Ssy:.1f} MPa
         Sf = {self.Ssf:.1f} MPa
-        Security factor (Sf/Sa): {self.calculate_safety_factor(sigma_max, sigma_min):.2f}"""
+        Security factor: {self.calculate_safety_factor(sigma_max, sigma_min):.2f}"""
 
             ax.text(0.02, 0.98, info_text, transform=ax.transAxes,
                     verticalalignment='top', fontsize=9,
@@ -201,12 +227,25 @@ class GoodmanAnalyzer:
         mean_tension = (sigma_max + sigma_min) / 2
         amplitude = (sigma_max - sigma_min) / 2
 
-        # Modified Goodman equation
-        if amplitude == 0:
-            return float('inf')
+        # 1. Pure static load case (no cyclic amplitude)
+        if amplitude <= 0:
+            if mean_tension <= 0:
+                return float('inf')
+            return self.Sut / mean_tension
 
-        safety_factor = 1 / (amplitude/self.Sse + mean_tension/self.Ssu)
-        return safety_factor
+        # 2. Select fatigue limit according to target cycle count
+        # If cycles < 1e6 se we have to use finite life (Ssf), otherwise Sse.
+        Sn = self.Ssf if self.data.cycles < 1e6 else self.Sse
+
+        # 3. Fatigue factor of safety (Modified Goodman criterion)
+        # Use Sut instead shear Ssu
+        n_fatigue = 1 / ((amplitude / Sn) + (mean_tension / self.Sut))
+
+        # 4. Static yield factor of safety (Langer yield guard line)
+        n_yield = self.Ssy / (amplitude + mean_tension)
+
+        # Governing safety factor is the minimum between fatigue and yield
+        return max(0.0, min(n_fatigue, n_yield))
 
     def get_analysis_summary(self, sigma_max: float, sigma_min: float) -> dict:
         """
