@@ -227,19 +227,23 @@ class GoodmanAnalyzer:
         mean_tension = (sigma_max + sigma_min) / 2
         amplitude = (sigma_max - sigma_min) / 2
 
+        # sigma_max/sigma_min are shear stresses for torsion/flexion loading,
+        # so the ultimate strength used against them must be the shear
+        # ultimate (Ssu), matching the shear yield (Ssy) used below.
+        ultimate = self.Ssu if self.data.load_type in ("torsion", "flexion") else self.Sut
+
         # 1. Pure static load case (no cyclic amplitude)
         if amplitude <= 0:
             if mean_tension <= 0:
                 return float('inf')
-            return self.Sut / mean_tension
+            return ultimate / mean_tension
 
         # 2. Select fatigue limit according to target cycle count
         # If cycles < 1e6 se we have to use finite life (Ssf), otherwise Sse.
         Sn = self.Ssf if self.data.cycles < 1e6 else self.Sse
 
         # 3. Fatigue factor of safety (Modified Goodman criterion)
-        # Use Sut instead shear Ssu
-        n_fatigue = 1 / ((amplitude / Sn) + (mean_tension / self.Sut))
+        n_fatigue = 1 / ((amplitude / Sn) + (mean_tension / ultimate))
 
         # 4. Static yield factor of safety (Langer yield guard line)
         n_yield = self.Ssy / (amplitude + mean_tension)

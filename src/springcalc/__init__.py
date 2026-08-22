@@ -29,10 +29,10 @@ from springcalc.report import SpringPDFReport
 from springcalc.pymodels.units import ureg
 from springcalc.lineal.plotting import interactive_backend
 from importlib.metadata import version as _version
-from springcalc.inverse_calc.lineal_comp_inv_claude import (
+from springcalc.inverse_calc.lineal_comp_inv import (
     CompressionSpringInverseDesigner
 )
-from springcalc.inverse_calc.conical_comp_inv_claude import (
+from springcalc.inverse_calc.conical_comp_inv import (
     ConicalCompressionSpringInverseDesigner,
 )
 __version__ = _version("springcalc")

@@ -1,6 +1,6 @@
 import pytest
 
-from springcalc.inverse_calc.lineal_comp_inv_claude import (
+from springcalc.inverse_calc.lineal_comp_inv import (
     CompressionSpringInverseDesigner,
     Requirements,
 )

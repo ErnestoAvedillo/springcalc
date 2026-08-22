@@ -2,9 +2,11 @@
 linear pitch profiles: D(h) = D_start + (D_end - D_start) * h / free_length,
 p(h) = p_start + (p_end - p_start) * h / free_length.
 
-Like the cylindrical designer (lineal_comp_inv_claude.py), the target rate
-and free length are solved directly from the two given length/force points
-(solve_rate_target), and the wire diameter is swept over the standard series.
+Like the cylindrical designer (lineal_comp_inv.py), the target rate and free
+length are solved from the given length/force points (solve_rate_target) --
+either exactly two, solved algebraically, or several via a CSV of
+(length, force) samples, fit by least squares -- and the wire diameter is
+swept over the standard series.
 
 What's new here is that a linear taper adds two free shape parameters -- the
 diameter taper ratio tau_D = D_end/D_start and the pitch taper ratio
@@ -54,7 +56,7 @@ from pint import Quantity
 from scipy.integrate import quad
 from scipy.optimize import brentq, minimize
 
-from .lineal_comp_inv_claude import Requirements, _shear_stress, solve_rate_target
+from .lineal_comp_inv import Requirements, _shear_stress, solve_rate_target
 from ..lineal.constants import COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
 from ..lineal.generic_compression import CompressionSpringGeneral
 from ..lineal.goodman import GoodmanAnalyzer, GoodmanData
@@ -64,7 +66,10 @@ from ..pymodels.wire_characteristics import get_standard_wire_diameters
 
 def linear_profile(start_mm: float, end_mm: float, free_length_mm: float):
     """A func_D/func_p-compatible closure for a quantity that varies linearly
-    from `start_mm` (at h=0) to `end_mm` (at h=free_length_mm)."""
+    from `start_mm` (at h=0) to `end_mm` (at h=free_length_mm). `h` is clamped
+    to [0, free_length_mm] first so callers evaluating slightly outside the
+    spring's axial extent (e.g. numerical overshoot) get the boundary value
+    instead of an extrapolated one."""
     def func(h):
         u = min(max(h.to('mm').magnitude / free_length_mm, 0.0), 1.0)
         return (start_mm + (end_mm - start_mm) * u) * ureg.mm
@@ -72,17 +77,29 @@ def linear_profile(start_mm: float, end_mm: float, free_length_mm: float):
 
 
 def _shape(u: np.ndarray, ratio: float) -> np.ndarray:
+    """Normalized linear taper shape on u in [0, 1]: 1 at u=0, `ratio` at
+    u=1. Used for both the diameter taper (ratio=tau_D) and the pitch taper
+    (ratio=tau_p) so D(h) = D_start * shape(h/L, tau_D) and likewise for p."""
     return 1.0 + (ratio - 1.0) * u
 
 
 def _taper_integral(tau_D: float, tau_p: float) -> float:
-    """integral_0^1 shape_D(u)^3 / shape_p(u) du"""
+    """I(tau_D, tau_p) = integral_0^1 shape_D(u)^3 / shape_p(u) du -- the
+    dimensionless shape factor that the module docstring's rate derivation
+    factors out of D(h)^3/p(h). Computed numerically (no closed form once
+    both diameter and pitch taper) since it only needs to be evaluated once
+    per (tau_D, tau_p) grid point / optimizer iteration, not per simulation
+    step."""
     value, _ = quad(lambda u: _shape(u, tau_D)**3 / _shape(u, tau_p), 0.0, 1.0)
     return value
 
 
 def _pitch_integral(tau_p: float) -> float:
-    """integral_0^1 1/shape_p(u) du, in closed form (log mean)."""
+    """integral_0^1 1/shape_p(u) du, in closed form (log mean). Used to turn
+    a pitch profile into a coil count: nr_coils = (free_length/p_start) *
+    this integral, since dtheta = 2*pi/p(h) dh integrates to 2*pi*nr_coils.
+    The tau_p -> 1 (constant pitch) case is a removable singularity of
+    log(tau_p)/(tau_p-1) that is handled by returning its limit, 1."""
     if abs(tau_p - 1.0) < 1e-9:
         return 1.0
     return log(tau_p) / (tau_p - 1.0)
@@ -90,6 +107,11 @@ def _pitch_integral(tau_p: float) -> float:
 
 @dataclass
 class ShapeCandidate:
+    """One evaluated (wire diameter, tau_D, tau_p) combination: the
+    diameter/pitch geometry it implies (solved to hit the rate and, via
+    pitch_start, the safety factor target), plus enough bookkeeping
+    (nr_coils, solid_length_mm, valid/rejection_reason) to rank it against
+    other candidates or explain why it was thrown out."""
     wire_diameter_mm: float
     tau_D: float
     tau_p: float
@@ -106,6 +128,10 @@ class ShapeCandidate:
 
 @dataclass
 class ConicalInverseCompressionDesign:
+    """The winning tapered design: a fully built, verified
+    `CompressionSpringGeneral` plus the geometry/performance numbers that
+    justify the choice, and the full `candidates` list (best shape per
+    standard wire diameter tried) for traceability."""
     spring: CompressionSpringGeneral
     wire_diameter: Quantity
     diameter_start: Quantity
@@ -122,6 +148,8 @@ class ConicalInverseCompressionDesign:
 
     @property
     def safety_factor_error(self) -> float:
+        """Positive means the design is more conservative (safer) than
+        requested; negative means it falls short of the target."""
         return self.safety_factor - self.safety_factor_target
 
 
@@ -163,11 +191,21 @@ class ConicalCompressionSpringInverseDesigner:
         self.free_length_target = rate.free_length
 
     def _solve_diameter_start(self, pitch_start_mm: float, wire_diameter_mm: float, taper_integral: float) -> float:
+        """Closed-form D_start that makes this (wire diameter, taper shape,
+        pitch scale) hit the target spring rate exactly -- the module
+        docstring's K = G*d^4*p_start / (8*D_start^3*L*I(tau_D,tau_p))
+        solved for D_start."""
         return (self.shear_modulus_mpa * wire_diameter_mm**4 * pitch_start_mm /
                 (8 * self.free_length_target * taper_integral * self.spring_constant_target)) ** (1.0 / 3.0)
 
     def _safety_factor_for_pitch_start(self, pitch_start_mm: float, tau_D: float, wire_diameter_mm: float,
                                        taper_integral: float, analyzer: GoodmanAnalyzer) -> tuple:
+        """Safety factor implied by a given pitch_start, for a fixed shape
+        (tau_D, tau_p folded into taper_integral) and wire diameter. First
+        solves D_start to satisfy the rate, then evaluates stress at the
+        larger-diameter end (D_start * max(1, tau_D)), which the module
+        docstring shows is always the critical section regardless of
+        pitch."""
         diameter_start_mm = self._solve_diameter_start(pitch_start_mm, wire_diameter_mm, taper_integral)
         diameter_max_mm = diameter_start_mm * max(1.0, tau_D)
         stress_hi = _shear_stress(diameter_max_mm, wire_diameter_mm, self.force_hi)
@@ -176,9 +214,19 @@ class ConicalCompressionSpringInverseDesigner:
 
     def _evaluate_shape(self, tau_D: float, tau_p: float, wire_diameter_mm: float,
                         analyzer: GoodmanAnalyzer) -> ShapeCandidate:
+        """For one fixed taper shape (tau_D, tau_p) and wire diameter, solve
+        for the pitch_start that hits the safety-factor target (root finding,
+        since safety factor is monotonic in pitch_start per the module
+        docstring), then derive the rest of the geometry and check it's
+        physically valid."""
         taper_integral = _taper_integral(tau_D, tau_p)
         pitch_integral = _pitch_integral(tau_p)
 
+        # Lower bound: pitch just barely bigger than the wire diameter at the
+        # tightest point of the pitch taper (min(1, tau_p) is the smaller end
+        # of the shape function), with a 0.1% margin so coils don't touch at
+        # free length. Upper bound: generous enough to contain the root for
+        # any sane free length while never requiring an unbounded search.
         margin = 1.001
         pitch_start_lo = margin * wire_diameter_mm / min(1.0, tau_p)
         pitch_start_hi = max(self.free_length_target, 50 * pitch_start_lo)
@@ -202,6 +250,12 @@ class ConicalCompressionSpringInverseDesigner:
         pitch_end_mm = pitch_start_mm * tau_p
         nr_coils = (self.free_length_target / pitch_start_mm) * pitch_integral
 
+        # If the diameter change over the coil stack (diameter_spread_mm) is
+        # at least as large as the stacked wire thickness (nr_coils *
+        # wire_diameter_mm), the cone is steep enough that every coil can
+        # nest fully inside the next, so the spring compresses down to
+        # essentially one wire diameter. Otherwise it solid-packs coil by
+        # coil like a cylindrical spring.
         diameter_spread_mm = abs(diameter_start_mm - diameter_end_mm)
         fully_telescoped = diameter_spread_mm >= nr_coils * wire_diameter_mm
         solid_length_mm = wire_diameter_mm if fully_telescoped else nr_coils * wire_diameter_mm
@@ -227,9 +281,19 @@ class ConicalCompressionSpringInverseDesigner:
 
     @staticmethod
     def _rank(candidate: ShapeCandidate, target: float) -> tuple:
+        """Sort key used everywhere a "best" candidate is picked: hitting
+        the safety-factor target dominates, and among equally-good safety
+        factors the more compact (shorter solid length) shape wins -- the
+        stated reason to reach for a conical spring at all."""
         return (abs(candidate.safety_factor - target), candidate.solid_length_mm)
 
     def _search_wire_diameter(self, wire_diameter_mm: float) -> ShapeCandidate:
+        """For one wire diameter, find the best (tau_D, tau_p) taper shape:
+        first coarsely by evaluating every point of a shape_grid_resolution^2
+        grid (cheap since each point is a closed-form/1-D-root-find
+        evaluation, and a grid avoids a local optimizer getting stuck on a
+        bad starting guess in a 2-D, possibly multi-modal objective), then
+        locally polished with Nelder-Mead around the grid winner."""
         goodman_data = GoodmanData(material=self.material, diameter=wire_diameter_mm,
                                    load_type='torsion', cycles=int(self.number_cycles))
         analyzer = GoodmanAnalyzer(goodman_data, shot_peening=self.shot_peening)
@@ -241,6 +305,10 @@ class ConicalCompressionSpringInverseDesigner:
 
         best = min(grid_candidates, key=lambda c: self._rank(c, self.safety_factor_target))
 
+        # Only polish if the grid already found a physically valid shape --
+        # polishing an invalid one has no valid neighborhood to refine into,
+        # and the grid search across the full shape space is more reliable
+        # than a local optimizer for finding validity in the first place.
         if best.valid:
             def objective(x):
                 candidate = self._evaluate_shape(x[0], x[1], wire_diameter_mm, analyzer)
@@ -262,6 +330,7 @@ class ConicalCompressionSpringInverseDesigner:
         d_min, d_max = self.wire_diameter_bounds
         wire_diameters = [d for d in get_standard_wire_diameters() if d_min <= d <= d_max]
 
+        # One independent shape search per standard wire diameter.
         candidates = [self._search_wire_diameter(d) for d in wire_diameters]
         valid_candidates = [c for c in candidates if c.valid]
         if not valid_candidates:
@@ -271,6 +340,11 @@ class ConicalCompressionSpringInverseDesigner:
         best = min(valid_candidates, key=lambda c: self._rank(c, self.safety_factor_target))
 
         free_length_mm = self.free_length_target
+        # Rebuild the winning geometry through the real, contact-aware
+        # CompressionSpringGeneral (func_D/func_p based) rather than trusting
+        # the closed-form pre-contact numbers used during the search, so the
+        # returned design's reported stress/safety-factor come from the same
+        # verified machinery every other spring type in this library uses.
         spring = CompressionSpringGeneral(material=self.material, wire_diameter=best.wire_diameter_mm * ureg.mm)
         spring.number_cycles = self.number_cycles
         spring.shot_peening = self.shot_peening

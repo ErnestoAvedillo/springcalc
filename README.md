@@ -19,7 +19,8 @@ src/springcalc/         Library package
 ├── regresiones/        Fitted models loaded at runtime
 │   └── factor_f/       Shigley's factor f (plain JSON coefficients + loader)
 ├── plots/              Goodman diagram generation
-└── report/             PDF report generation (SpringPDFReport)
+├── report/             PDF report generation (SpringPDFReport)
+└── inverse_calc/       Inverse design: find spring geometry from a target rate or curve
 
 tests/                  Tests (pytest)
 scripts/regresiones/    Training scripts that regenerate the JSON coefficients (not runtime)
@@ -71,6 +72,7 @@ report.build("spring_report.pdf")
 - [PDF reports](#pdf-reports) — `SpringPDFReport`
 - [Advanced: variable-geometry springs](#advanced-variable-geometry-springs) — `VariableLinealSpring`, `CompressionSpringGeneral`
 - [Animating progressive compression](#animating-progressive-compression) — `CompressionAnimator`
+- [Inverse design](#inverse-design) — `CompressionSpringInverseDesigner`, `ConicalCompressionSpringInverseDesigner`, `ConicalCurveCompressionSpringInverseDesigner`
 
 All physical quantities are [`pint`](https://pint.readthedocs.io/) `Quantity`
 objects (a number with a unit, e.g. `20.0 millimeter`). Plain numbers passed
@@ -462,6 +464,134 @@ spring.set_geometry(func_D=lambda h: 20 * ureg.mm, func_p=lambda h: 6 * ureg.mm,
 
 animator = CompressionAnimator(spring)
 animator.create_gif(max_deflection=25 * ureg.mm, output_path="compression.gif")
+```
+
+### Inverse design
+
+`springcalc.inverse_calc` (not exported from the top-level `springcalc`
+package — import from its modules directly) works backwards from a target
+spring *rate* or a target force-displacement *curve* to a buildable geometry,
+instead of computing properties from geometry you already chose. All three
+designers search the standard wire diameter series
+(`get_standard_wire_diameters()`), score candidates against a target fatigue
+safety factor (via `GoodmanAnalyzer`), and rebuild/verify the winning design
+with the library's normal spring classes before returning it — so the
+returned `.spring` behaves exactly like a spring you built by hand.
+
+#### Cylindrical spring from two (or more) rate points
+
+`CompressionSpringInverseDesigner`
+(`springcalc.inverse_calc.lineal_comp_inv`) finds the wire diameter and mean
+diameter of a standard (constant-diameter, constant-pitch) `CompressionSpring`
+that reproduces a target rate while landing the safety factor as close as
+possible to a target value. The number of coils is always solved so the rate
+matches exactly; for each standard wire diameter, the mean diameter that hits
+the safety-factor target is found by 1-D root finding.
+
+| Member | Description |
+|---|---|
+| `Requirements(material, security_factor, length1=None, length2=None, force1=None, force2=None, csv_path=None)` | Design brief. Give either `length1`/`length2`/`force1`/`force2` (two exact length/force points) or `csv_path` (a CSV with `length`,`force` columns, mm/N, fit by least squares) — not both. Also used by the conical designers below. |
+| `CompressionSpringInverseDesigner(requirements, type_of_end=..., type_conforming=..., spring_index_bounds=(4.5, 12.0), wire_diameter_bounds=(0.0, inf), min_active_coils=2.0, number_cycles=1_000_000, shot_peening=False)` | Construct the designer. |
+| `.design()` | Runs the search and returns an `InverseCompressionDesign`. |
+| `InverseCompressionDesign.spring` | The winning, fully built `CompressionSpring` (load positions already added at the two extreme lengths). |
+| `.wire_diameter` / `.mean_diameter` / `.free_length` / `.nr_coils` / `.spring_index` / `.spring_constant` | Resulting geometry, as `Quantity`/`float`. |
+| `.safety_factor` / `.safety_factor_target` / `.safety_factor_error` | Achieved vs. target safety factor (`error` is positive when more conservative than requested). |
+| `.candidates` | `list[CandidateDesign]`, one per standard wire diameter tried (valid or not), for traceability. |
+
+```python
+from springcalc.inverse_calc.lineal_comp_inv import CompressionSpringInverseDesigner, Requirements
+from springcalc.pymodels.material import Material
+
+material = Material(material_name="SL")
+requirements = Requirements(
+    material=material, security_factor=1.5,
+    length1=60, force1=200,   # more compressed, higher-force point
+    length2=90, force2=50,    # less compressed, lower-force point
+)
+result = CompressionSpringInverseDesigner(requirements).design()
+
+print(result.wire_diameter, result.mean_diameter, result.nr_coils)
+print(result.safety_factor, result.safety_factor_error)
+```
+
+#### Conical (tapered) spring from two (or more) rate points
+
+`ConicalCompressionSpringInverseDesigner`
+(`springcalc.inverse_calc.conical_comp_inv`) is the same idea, but for a
+linearly-tapered (diameter *and* pitch) conical spring built on
+`CompressionSpringGeneral`. The rate and safety-factor equations alone leave
+the taper shape (`tau_D` = D_end/D_start, `tau_p` = p_end/p_start) free, so
+the extra degree of freedom is resolved by minimizing solid length — i.e.
+preferring the most compact (most telescoping) taper, the usual reason to
+choose a conical spring at all. For each standard wire diameter, the taper
+shape is searched on a grid and locally polished (Nelder-Mead).
+
+| Member | Description |
+|---|---|
+| `ConicalCompressionSpringInverseDesigner(requirements, type_of_end=..., type_conforming=..., spring_index_bounds=(4.5, 12.0), taper_ratio_bounds=(0.3, 1.0), pitch_ratio_bounds=(0.3, 3.0), wire_diameter_bounds=(0.0, inf), min_coils=2.0, shape_grid_resolution=9, number_cycles=1_000_000, shot_peening=False)` | Construct the designer with the same `Requirements` used above. |
+| `.design()` | Runs the search and returns a `ConicalInverseCompressionDesign`. |
+| `ConicalInverseCompressionDesign.spring` | The winning, fully built `CompressionSpringGeneral`. |
+| `.diameter_start` / `.diameter_end` / `.pitch_start` / `.pitch_end` / `.free_length` / `.nr_coils` / `.solid_length` / `.spring_constant` | Resulting geometry, as `Quantity`/`float`. |
+| `.safety_factor` / `.safety_factor_target` / `.safety_factor_error` | Achieved vs. target safety factor. |
+| `.candidates` | `list[ShapeCandidate]`, best taper shape per standard wire diameter tried. |
+| `linear_profile(start_mm, end_mm, free_length_mm)` | Module function: builds a `func_D`/`func_p`-compatible closure for a linearly-varying quantity — handy for feeding the winning geometry into `CompressionSpringGeneral.set_geometry()` directly. |
+
+```python
+from springcalc.inverse_calc.conical_comp_inv import ConicalCompressionSpringInverseDesigner
+from springcalc.inverse_calc.lineal_comp_inv import Requirements
+from springcalc.pymodels.material import Material
+
+material = Material(material_name="SL")
+requirements = Requirements(material=material, security_factor=1.2,
+                            length1=60, force1=200, length2=90, force2=50)
+result = ConicalCompressionSpringInverseDesigner(requirements).design()
+
+print(result.diameter_start, result.diameter_end)
+print(result.pitch_start, result.pitch_end)
+print(result.solid_length)
+```
+
+#### Conical (tapered) spring fit to a full force-displacement curve
+
+`ConicalCurveCompressionSpringInverseDesigner`
+(`springcalc.inverse_calc.conical_curve_comp_inv`) fits a conical spring's
+wire diameter, free length, and diameter/pitch taper to an entire target
+force-vs-displacement curve (rather than just two points), so it can capture
+progressive stiffening from coil-to-coil contact. There's no closed form for
+this, so it's a regression: `scipy.optimize.differential_evolution` searches
+the 6-parameter space (wire diameter, free length, D_start, D_end, p_start,
+p_end), minimizing curve RMSE plus a soft safety-factor term plus a geometry
+penalty, using a fast closed-form contact simulation; the winning wire
+diameter is then snapped to the standard series and the rest locally
+re-fit before the final design is rebuilt with the real, general
+`CompressionSpringGeneral` machinery.
+
+| Member | Description |
+|---|---|
+| `CompressionCurveRequirements(material, security_factor, csv_path)` | Design brief: `csv_path` is a CSV with `displacement`,`load` columns (mm, N) — `displacement` is travel from the free length, not an absolute position. |
+| `load_target_curve(csv_path)` | Module function: reads and sorts the target curve; returns `(displacement, load)` numpy arrays. |
+| `ConicalCurveCompressionSpringInverseDesigner(requirements, type_of_end=..., type_conforming=..., spring_index_bounds=(4.5, 12.0), wire_diameter_bounds=(0.3, 10.0), diameter_bounds=(3.0, 150.0), pitch_bounds=(0.3, 40.0), free_length_margin=(1.05, 3.0), min_coils=2.0, safety_factor_weight=1.0, penalty_weight=0.05, search_num_points=60, search_steps=60, final_num_points=500, final_steps=500, maxiter=60, popsize=15, seed=None, number_cycles=1_000_000, shot_peening=False)` | Construct the designer. `seed` makes the regression reproducible. |
+| `.design()` | Runs the regression and returns a `ConicalCurveInverseDesign`. |
+| `ConicalCurveInverseDesign.spring` | The winning, fully built `CompressionSpringGeneral`. |
+| `.diameter_start` / `.diameter_end` / `.pitch_start` / `.pitch_end` / `.free_length` / `.nr_coils` / `.solid_length` | Resulting geometry, as `Quantity`/`float`. |
+| `.safety_factor` / `.safety_factor_target` / `.safety_factor_error` | Achieved vs. target safety factor. |
+| `.curve_rmse` / `.curve_rmse_relative` | Fit quality: RMSE between the simulated and target curves (`Quantity` in N), and that RMSE relative to the target curve's typical load magnitude. |
+| `.target_displacement` / `.target_load` / `.simulated_displacement` / `.simulated_load` | Both curves as numpy arrays, ready to plot against each other. |
+
+```python
+from springcalc.inverse_calc.conical_curve_comp_inv import (
+    CompressionCurveRequirements, ConicalCurveCompressionSpringInverseDesigner,
+)
+from springcalc.pymodels.material import Material
+
+material = Material(material_name="SL")
+requirements = CompressionCurveRequirements(
+    material=material, security_factor=1.3, csv_path="target_curve.csv",  # displacement,load columns (mm, N)
+)
+result = ConicalCurveCompressionSpringInverseDesigner(requirements, seed=0).design()
+
+print(result.curve_rmse, result.curve_rmse_relative)
+print(result.diameter_start, result.diameter_end, result.pitch_start, result.pitch_end)
 ```
 
 ## Tests

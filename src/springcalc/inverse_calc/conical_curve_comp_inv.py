@@ -2,7 +2,7 @@
 compression spring that fits a full target force-vs-displacement curve,
 instead of just two (length, force) points.
 
-The point-based designer (conical_comp_inv_claude.py) assumes both given
+The point-based designer (conical_comp_inv.py) assumes both given
 points sit in the pre-contact linear regime, which lets the rate, free
 length and safety factor be solved for algebraically. A full curve doesn't
 get that assumption for free: its shape -- in particular the progressive
@@ -49,8 +49,8 @@ from pint import Quantity
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import differential_evolution, minimize
 
-from .conical_comp_inv_claude import _pitch_integral, linear_profile
-from .lineal_comp_inv_claude import _shear_stress
+from .conical_comp_inv import _pitch_integral, linear_profile
+from .lineal_comp_inv import _shear_stress
 from ..lineal.constants import COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
 from ..lineal.generic_compression import CompressionSpringGeneral
 from ..lineal.goodman import GoodmanAnalyzer, GoodmanData
@@ -61,6 +61,10 @@ from ..pymodels.wire_characteristics import get_standard_wire_diameters
 
 @dataclass
 class CompressionCurveRequirements:
+    """User-facing design brief for the curve-fitting designer: a material,
+    a target fatigue safety factor (entered as a soft term, see module
+    docstring), and a CSV path holding the target force-displacement curve
+    to reproduce."""
     material: Material
     security_factor: float
     csv_path: str
@@ -86,15 +90,25 @@ def _theta_h_closed_form(pitch_start_mm: float, pitch_end_mm: float, free_length
     ln(p(h)/pitch_start), inverted to h(theta) = (pitch_start/slope) *
     (exp(slope*theta/(2*pi)) - 1). The slope~0 case (constant pitch) is the
     limit of that formula, theta = 2*pi*h/pitch_start."""
+    # Constant-pitch degenerate case: the general log/exp formula below has a
+    # 0/0 at slope=0 (both theta_max and zs would divide by it), so use the
+    # simple linear theta<->z relationship that is its limit instead.
     slope = (pitch_end_mm - pitch_start_mm) / free_length_mm
     if abs(slope) < 1e-9:
         theta_max = 2 * np.pi * free_length_mm / pitch_start_mm
         thetas = np.linspace(0.0, theta_max, num_points)
         zs = pitch_start_mm * thetas / (2 * np.pi)
     else:
+        # theta_max is theta(free_length_mm) from the closed form; thetas is
+        # then sampled uniformly in the winding angle (not in z), matching
+        # how the general (fsolve-based) method discretizes, so downstream
+        # per-turn indexing (points_per_turn) lines up the same way.
         theta_max = (2 * np.pi / slope) * np.log(pitch_end_mm / pitch_start_mm)
         thetas = np.linspace(0.0, theta_max, num_points)
         zs = (pitch_start_mm / slope) * (np.exp(slope * thetas / (2 * np.pi)) - 1.0)
+    # Numerical noise near the endpoints could push zs a hair outside
+    # [0, free_length_mm]; clip since the physical spring can't extend past
+    # its own axial extent.
     return thetas, np.clip(zs, 0.0, free_length_mm)
 
 
@@ -105,13 +119,24 @@ def _fast_progressive_compression(wire_diameter_mm: float, diameter_start_mm: fl
     """Same contact-aware stepping algorithm as VariableLinealSpring.
     simulate_progressive_compression, but fed a closed-form (thetas, zs_free)
     instead of one numerically solved per point -- see module docstring."""
+    # Discretize the coil into num_points winding-angle samples using the
+    # closed-form theta<->z mapping (no per-point fsolve, see module
+    # docstring), and get each sample's local diameter/radius from the
+    # linear diameter profile evaluated at its free-length axial position.
     thetas, zs_free = _theta_h_closed_form(pitch_start_mm, pitch_end_mm, free_length_mm, num_points)
     diameters = diameter_start_mm + (diameter_end_mm - diameter_start_mm) * zs_free / free_length_mm
     radii = diameters / 2.0
 
+    # How many discretization points make up one full turn (2*pi of winding
+    # angle), used below to compare each point against the point exactly one
+    # turn above it -- i.e. the coil surface it would collide with.
     dtheta = thetas[1] - thetas[0] if len(thetas) > 1 else 1.0
     points_per_turn = max(int(round((2 * np.pi) / dtheta)), 1) if dtheta > 0 else num_points
 
+    # Step the spring down from free length in fixed deflection increments,
+    # tracking cumulative axial displacement per point (delta_y) and the
+    # resulting force, the same incremental contact-detection scheme as
+    # VariableLinealSpring.simulate_progressive_compression.
     deflection_step = max_deflection_mm / steps
     delta_y = np.zeros_like(zs_free)
     current_force = 0.0
@@ -119,30 +144,67 @@ def _fast_progressive_compression(wire_diameter_mm: float, diameter_start_mm: fl
     force_history = [0.0]
 
     for step in range(1, steps + 1):
+        # A point is "active" (still flexing, contributing compliance) unless
+        # it has gone rigid this step -- either because it has jammed against
+        # the coil one turn above it, or because it has bottomed out on the
+        # floor. Both conditions are re-evaluated every step since contact
+        # progresses gradually up the taper as deflection increases.
         is_active = np.ones_like(thetas)
         for i in range(len(thetas) - points_per_turn):
             i_sup = i + points_per_turn
+            # Actual (post-deformation) axial gap between this point and the
+            # point one turn above it.
             z_inf_actual = zs_free[i] - delta_y[i]
             z_sup_actual = zs_free[i_sup] - delta_y[i_sup]
             pz_actual = abs(z_sup_actual - z_inf_actual)
+            # Radial offset between the two coils at this location (nonzero
+            # because the diameter tapers along the spring).
             delta_r = abs(radii[i_sup] - radii[i])
             if delta_r < wire_diameter_mm:
+                # Two coils of finite wire thickness with a radial offset
+                # delta_r can approach only until their centerlines are
+                # wire_diameter_mm apart in 3-D (oblique contact); the axial
+                # component of that minimum separation is this pz_limit
+                # (Pythagoras: wire_diameter_mm^2 = delta_r^2 + pz_limit^2).
                 pz_limit = np.sqrt(max(wire_diameter_mm**2 - delta_r**2, 0.0))
                 if pz_actual <= pz_limit:
+                    # Contact reached: freeze every point from i to i_sup
+                    # (the whole turn between the two contacting points),
+                    # since it can no longer accept further axial deflection.
                     is_active[i:i_sup + 1] = 0.0
 
+        # Floor contact: any point (other than the fixed end at index 0)
+        # that has been pushed to or past z=0 has bottomed out and stops
+        # flexing.
         z_actual = zs_free - delta_y
         touches_floor = z_actual <= 0.0
         touches_floor[0] = False
         is_active[touches_floor] = 0.0
 
+        # Local torsional flexibility per unit winding angle (inverse of the
+        # local torsional stiffness, from the standard helical-spring
+        # formula), zeroed out wherever the point is no longer active so it
+        # contributes no further compliance this step.
         local_flexibility = (8 * diameters**3) / (shear_modulus_mpa * (wire_diameter_mm**4) * 2 * np.pi)
         active_flexibility = local_flexibility * is_active
+        # Integrating the local flexibility over the winding angle gives the
+        # spring's overall instantaneous flexibility (1/k_inst); coils that
+        # went inactive this step effectively drop out of the series-spring
+        # model, which is exactly how contact stiffens a real coil spring.
         total_flex = np.trapezoid(active_flexibility, thetas)
 
         k_inst = float('inf') if total_flex <= 1e-9 else 1.0 / total_flex
         if k_inst != float('inf'):
+            # Force increment from this step's instantaneous rate (small-step
+            # linearization of a piecewise-changing stiffness).
             current_force += k_inst * deflection_step
+            # Distribute this step's deflection across still-active points in
+            # proportion to their share of the total flexibility (a stiffer,
+            # i.e. less flexible, point takes less of the deflection) --
+            # matching how a series arrangement of springs with different
+            # compliances shares an applied displacement. deformation_factor
+            # integrates (cumulative_trapezoid) to give each point's share of
+            # the *cumulative* deflection up to that winding angle.
             deformation_factor = active_flexibility / total_flex
             cumulative_deformation = cumulative_trapezoid(deformation_factor, thetas, initial=0.0)
             delta_y = delta_y + cumulative_deformation * deflection_step
@@ -150,6 +212,9 @@ def _fast_progressive_compression(wire_diameter_mm: float, diameter_start_mm: fl
         deflection_history.append(step * deflection_step)
         force_history.append(current_force)
         if k_inst == float('inf'):
+            # Every point has gone rigid (fully solid-packed or floored):
+            # further deflection is impossible, so the simulation stops
+            # early rather than iterating uselessly to `steps`.
             break
 
     return np.array(deflection_history), np.array(force_history)
@@ -157,6 +222,10 @@ def _fast_progressive_compression(wire_diameter_mm: float, diameter_start_mm: fl
 
 @dataclass
 class ConicalCurveInverseDesign:
+    """The winning design: a fully built, verified `CompressionSpringGeneral`
+    plus the fit quality (curve_rmse / curve_rmse_relative, comparing the
+    real simulated curve to the target) and both curves for plotting/
+    inspection (target_* vs simulated_*)."""
     spring: CompressionSpringGeneral
     wire_diameter: Quantity
     diameter_start: Quantity
@@ -177,6 +246,8 @@ class ConicalCurveInverseDesign:
 
     @property
     def safety_factor_error(self) -> float:
+        """Positive means the design is more conservative (safer) than
+        requested; negative means it falls short of the target."""
         return self.safety_factor - self.safety_factor_target
 
 
@@ -232,10 +303,20 @@ class ConicalCurveCompressionSpringInverseDesigner:
         self.target_displacement, self.target_load = load_target_curve(requirements.csv_path)
         if len(self.target_displacement) < 2:
             raise ValueError("The target curve must have at least two points")
+        # Scale RMSE by the typical target load magnitude so norm_rmse is a
+        # unitless relative error, comparable across curves of very
+        # different force ranges (and combinable with the safety-factor
+        # error term in the same objective without one dominating on units
+        # alone). The 1e-6 floor guards against a near-all-zero target curve.
         self._target_load_scale = max(float(np.mean(np.abs(self.target_load))), 1e-6)
         self._analyzer_cache: dict = {}
 
     def _analyzer(self, wire_diameter_mm: float) -> GoodmanAnalyzer:
+        """Build (or reuse) the Goodman fatigue analyzer for a wire
+        diameter. Constructing one involves a materials lookup (surface
+        finish factor etc.) that only depends on diameter, so caching avoids
+        repeating it for every one of the many evaluations the optimizer
+        makes at the same candidate diameter."""
         # RMa lookup only depends on wire diameter; cache analyzers across
         # the (many) evaluations at the same diameter within one search.
         cached = self._analyzer_cache.get(wire_diameter_mm)
@@ -248,6 +329,10 @@ class ConicalCurveCompressionSpringInverseDesigner:
 
     def _build_spring(self, wire_diameter_mm: float, diameter_start_mm: float, diameter_end_mm: float,
                       pitch_start_mm: float, pitch_end_mm: float, free_length_mm: float) -> CompressionSpringGeneral:
+        """Construct the real, general-purpose CompressionSpringGeneral for
+        a given geometry. Used only once the search is done (building the
+        final, reported design) -- the search itself uses the much cheaper
+        _fast_progressive_compression instead."""
         spring = CompressionSpringGeneral(material=self.material, wire_diameter=wire_diameter_mm * ureg.mm)
         spring.number_cycles = self.number_cycles
         spring.shot_peening = self.shot_peening
@@ -263,6 +348,16 @@ class ConicalCurveCompressionSpringInverseDesigner:
     def _geometry_penalty(self, wire_diameter_mm: float, diameter_start_mm: float, diameter_end_mm: float,
                           pitch_start_mm: float, pitch_end_mm: float, nr_coils: float,
                           solid_length_mm: float, shortest_length_mm: float) -> float:
+        """Soft constraints added to the regression objective so the
+        optimizer is steered away from geometries that fit the curve well
+        numerically but aren't sound springs: spring index (D/d) kept inside
+        bounds at both ends of the taper, pitch never smaller than the wire
+        (coils touching already at free length), enough coils to be a real
+        spring, and a solid length that doesn't already reach the shortest
+        length the target curve exercises. Each violation is squared so the
+        penalty grows smoothly from zero at the boundary (as opposed to a
+        hard reject), which keeps the objective differentiable-ish for
+        Nelder-Mead's local refinement step."""
         c_lo, c_hi = self.spring_index_bounds
         penalty = 0.0
         for diameter_mm in (diameter_start_mm, diameter_end_mm):
@@ -276,11 +371,22 @@ class ConicalCurveCompressionSpringInverseDesigner:
         return penalty * self.penalty_weight
 
     def _evaluate(self, x, num_points: int, steps: int) -> float:
+        """Objective function minimized by the search: how well one
+        candidate (wire diameter, free length, diameter/pitch taper)
+        reproduces the target curve, adjusted by how close it lands to the
+        safety-factor target and penalized for implausible geometry. Lower
+        is better; any failure (e.g. an exception from a degenerate
+        geometry) is scored as a large constant so the optimizer treats it
+        as clearly worse than any successful evaluation, without crashing
+        the search."""
         wire_diameter_mm, free_length_mm, diameter_start_mm, diameter_end_mm, pitch_start_mm, pitch_end_mm = x
         try:
             deflection, force = _fast_progressive_compression(
                 wire_diameter_mm, diameter_start_mm, diameter_end_mm, pitch_start_mm, pitch_end_mm,
                 free_length_mm, self.shear_modulus_mpa, free_length_mm, steps, num_points)
+            # Resample the simulated curve at the target's own displacement
+            # points (curves may be discretized differently / have unequal
+            # length) so the RMSE compares like-for-like.
             predicted_load = np.interp(self.target_displacement, deflection, force)
             rmse = float(np.sqrt(np.mean((predicted_load - self.target_load) ** 2)))
             norm_rmse = rmse / self._target_load_scale
@@ -314,8 +420,16 @@ class ConicalCurveCompressionSpringInverseDesigner:
             return 1e6
 
     def design(self) -> ConicalCurveInverseDesign:
+        """Run the two-stage regression (global search, then a local polish
+        around the nearest standard wire diameter) and return the best
+        design, rebuilt and re-verified with the real spring machinery."""
         max_displacement = float(self.target_displacement.max())
         margin_lo, margin_hi = self.free_length_margin
+        # free_length must exceed the target curve's max displacement (the
+        # spring can't be compressed past its own free length); the margin
+        # bounds set how much longer it's allowed to be, since a longer free
+        # length spreads the same coils over more length and changes the
+        # rate independently of the diameter/pitch taper.
         bounds = [
             self.wire_diameter_bounds,
             (max_displacement * margin_lo, max_displacement * margin_hi),
@@ -325,6 +439,9 @@ class ConicalCurveCompressionSpringInverseDesigner:
             self.pitch_bounds,
         ]
 
+        # Global, derivative-free search over the full 6-parameter space
+        # using the fast closed-form simulation (search_num_points/
+        # search_steps -- coarse, since this runs thousands of times).
         result = differential_evolution(
             lambda x: self._evaluate(x, self.search_num_points, self.search_steps),
             bounds, maxiter=self.maxiter, popsize=self.popsize, seed=self.seed,
@@ -340,12 +457,22 @@ class ConicalCurveCompressionSpringInverseDesigner:
         def objective_fixed_diameter(y):
             return self._evaluate([wire_diameter_mm, *y], self.search_num_points, self.search_steps)
 
+        # Local polish (Nelder-Mead) recovers the fit quality lost by
+        # snapping the diameter to a discrete standard size, by re-optimizing
+        # the remaining continuous parameters (free length, taper, pitch)
+        # around the differential_evolution result.
         refined = minimize(objective_fixed_diameter,
                            x0=[free_length_mm, diameter_start_mm, diameter_end_mm, pitch_start_mm, pitch_end_mm],
                            method='Nelder-Mead', bounds=bounds[1:])
         if refined.success:
             free_length_mm, diameter_start_mm, diameter_end_mm, pitch_start_mm, pitch_end_mm = refined.x
 
+        # From here on, everything is computed with the real, general,
+        # contact-aware CompressionSpringGeneral (final_num_points/
+        # final_steps -- fine resolution, since this only runs once), so the
+        # reported curve, stresses and safety factor come from the
+        # unmodified library machinery rather than the search's fast
+        # approximation.
         spring = self._build_spring(wire_diameter_mm, diameter_start_mm, diameter_end_mm,
                                     pitch_start_mm, pitch_end_mm, free_length_mm)
         spring.calculate_spring_properties(num_points=self.final_num_points)
@@ -357,6 +484,9 @@ class ConicalCurveCompressionSpringInverseDesigner:
         rmse = float(np.sqrt(np.mean((predicted_load - self.target_load) ** 2)))
         norm_rmse = rmse / self._target_load_scale
 
+        # Register the two extreme working lengths from the target curve
+        # with the real spring so its own stress-at-position machinery (not
+        # the search's approximation) supplies the reported safety factor.
         length_hi = free_length_mm - max_displacement
         length_lo = free_length_mm - float(self.target_displacement.min())
         spring.add_load_position(length_hi * ureg.mm)

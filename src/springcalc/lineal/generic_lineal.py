@@ -6,7 +6,7 @@ from ..pymodels.units import ureg
 from .constants import COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
 from ..pymodels.wire_characteristics import WireCharacteristics
 from scipy.integrate import quad, cumulative_trapezoid
-from scipy.optimize import fsolve
+from scipy.optimize import brentq
 
 # (Keep your other imports: ureg, WireCharacteristics, Material, etc.)
 
@@ -169,18 +169,20 @@ class VariableLinealSpring(WireCharacteristics):
             H_val = self.free_length.to('mm').magnitude
 
             def equation(z_test):
-                # fsolve passes z_test as a 1-element array; quad's bounds need a plain scalar.
-                # fsolve is unconstrained and can probe (or converge to) z values that
-                # overshoot [0, H_val] by a float-tolerance sliver, which f_pitch/f_mean_diameter
-                # implementations may legitimately reject as out of the physical domain.
-                z_val = min(max(float(np.atleast_1d(z_test)[0]), 0.0), H_val)
                 # Integral from z_prev to z_test of (2*pi / p(h)) dh
-                val, _ = quad(lambda h: (2 * np.pi) / self.f_pitch(h * ureg.mm).to('mm').magnitude, z_prev, z_val)
+                val, _ = quad(lambda h: (2 * np.pi) / self.f_pitch(h * ureg.mm).to('mm').magnitude, z_prev, z_test)
                 return val - theta_delta
 
-            # Find the root (initial guess = previous point, or a proportional estimate for the first point)
-            guess = zs[i - 1] if i > 0 else H_val * theta / self.theta_max
-            zs[i] = min(max(fsolve(equation, guess)[0], 0.0), H_val)
+            # cumulative theta is monotonically increasing in z (p(h) > 0), so the
+            # root is bracketed by [z_prev, H_val] whenever theta is reachable within
+            # the remaining length; brentq exploits that directly instead of hunting
+            # for it from a guess the way fsolve does, which was prone to overshoot
+            # past the physical domain and stall ("not making good progress") near
+            # the free end.
+            if equation(H_val) <= 0.0:
+                zs[i] = H_val
+            else:
+                zs[i] = brentq(equation, z_prev, H_val)
 
         return thetas, zs
 

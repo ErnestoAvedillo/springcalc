@@ -1,11 +1,11 @@
 import pytest
 
-from springcalc.inverse_calc.conical_comp_inv_claude import (
+from springcalc.inverse_calc.conical_comp_inv import (
     ConicalCompressionSpringInverseDesigner,
     _pitch_integral,
     _taper_integral,
 )
-from springcalc.inverse_calc.lineal_comp_inv_claude import Requirements
+from springcalc.inverse_calc.lineal_comp_inv import Requirements
 from springcalc.lineal.goodman import GoodmanAnalyzer, GoodmanData
 from springcalc.pymodels.material import Material
 
@@ -15,7 +15,7 @@ def material():
     return Material(material_name="SL")
 
 
-def make_requirements(material, security_factor=1.5, length1=60, force1=200, length2=90, force2=50):
+def make_requirements(material, security_factor=1.2, length1=60, force1=200, length2=90, force2=50):
     return Requirements(
         material=material,
         security_factor=security_factor,

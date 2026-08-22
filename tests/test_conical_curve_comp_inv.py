@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from springcalc.inverse_calc.conical_comp_inv_claude import linear_profile
-from springcalc.inverse_calc.conical_curve_comp_inv_claude import (
+from springcalc.inverse_calc.conical_comp_inv import linear_profile
+from springcalc.inverse_calc.conical_curve_comp_inv import (
     CompressionCurveRequirements,
     ConicalCurveCompressionSpringInverseDesigner,
     _fast_progressive_compression,
@@ -12,7 +12,7 @@ from springcalc.inverse_calc.conical_curve_comp_inv_claude import (
 from springcalc.lineal.generic_compression import CompressionSpringGeneral
 from springcalc.pymodels.material import Material
 from springcalc.pymodels.units import ureg
-
+from springcalc.report.pdf_report import SpringPDFReport
 
 @pytest.fixture
 def material():
@@ -118,8 +118,9 @@ def test_full_curve_fit_design_reproduces_target_curve_shape(material, target_cu
     # the slow part of this test (the final build alone takes ~20-30s).
     requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=target_curve_csv)
     designer = ConicalCurveCompressionSpringInverseDesigner(requirements, seed=0)
-
     result = designer.design()
+    report = SpringPDFReport(spring=result.spring, title="Conic result")
+    report.build(output_path="Report conical variable.pdf")
 
     assert result.curve_rmse_relative < 0.2
     # safety_factor_weight makes this a *soft* term competing with curve
@@ -146,3 +147,4 @@ if __name__ == "__main__":
     test_fast_progressive_compression_matches_real_simulation(mat)
     test_fast_progressive_compression_handles_constant_pitch(mat)
     print("All conical_curve_comp_inv_claude fast-path tests passed.")
+    
