@@ -35,6 +35,9 @@ from springcalc.inverse_calc.lineal_comp_inv import (
 from springcalc.inverse_calc.conical_comp_inv import (
     ConicalCompressionSpringInverseDesigner,
 )
+from springcalc.inverse_calc.conical_curve_comp_inv import (
+    ConicalCurveCompressionSpringInverseDesigner,
+)
 __version__ = _version("springcalc")
 
 __all__ = [
@@ -63,5 +66,6 @@ __all__ = [
     "interactive_backend",
     "CompressionSpringInverseDesigner",
     "ConicalCompressionSpringInverseDesigner",
+    "ConicalCurveCompressionSpringInverseDesigner",
     "__version__",
 ]

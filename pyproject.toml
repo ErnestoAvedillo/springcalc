@@ -1,6 +1,6 @@
 [project]
 name = "springcalc"
-version = "0.1.18"
+version = "0.1.19"
 description = "Spring calculation library: compression, extension, and torsion."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -64,8 +64,6 @@ build-backend = "hatchling.build"
 # though factor_f_coeffs.json is tracked in git.
 packages = ["src/springcalc"]
 artifacts = ["src/springcalc/regresiones/factor_f/factor_f_coeffs.json"]
-# inverse_calc is work-in-progress and not ready to ship.
-exclude = ["src/springcalc/inverse_calc"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
