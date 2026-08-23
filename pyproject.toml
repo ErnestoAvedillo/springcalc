@@ -47,6 +47,9 @@ publish = [
 training = [
     "scikit-learn>=1.5",
 ]
+step = [
+    "cadquery>=2.8.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/ErnestoAvedillo/pysprings"

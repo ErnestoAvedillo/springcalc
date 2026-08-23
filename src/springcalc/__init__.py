@@ -25,7 +25,15 @@ from springcalc.pymodels.positions import (
 )
 from springcalc.pymodels.wire_characteristics import get_wire_tolerance, get_RMa_range
 from springcalc.plots.goodman_diagram import generate_goodman_diagram
-from springcalc.report import SpringPDFReport
+from springcalc.report import (
+    SpringPDFReport,
+    SupplierSpecSheet,
+    spring_geometry_to_dict,
+    spring_geometry_to_json,
+    spring_geometry_to_csv,
+    spring_geometry_profile,
+    spring_geometry_to_step,
+)
 from springcalc.pymodels.units import ureg
 from springcalc.lineal.plotting import interactive_backend
 from importlib.metadata import version as _version
@@ -62,6 +70,12 @@ __all__ = [
     "Goodman",
     "generate_goodman_diagram",
     "SpringPDFReport",
+    "SupplierSpecSheet",
+    "spring_geometry_to_dict",
+    "spring_geometry_to_json",
+    "spring_geometry_to_csv",
+    "spring_geometry_profile",
+    "spring_geometry_to_step",
     "ureg",
     "interactive_backend",
     "CompressionSpringInverseDesigner",
