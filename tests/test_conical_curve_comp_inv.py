@@ -140,6 +140,9 @@ def test_full_curve_fit_design_reproduces_target_curve_shape(material, target_cu
     assert result.solid_length.to("mm").magnitude < (
         result.free_length.to("mm").magnitude - float(designer.target_displacement.max())
     )
+    # Every point of the target curve -- not just its two extremes -- must be
+    # registered on the returned spring, so a later report can list/plot them all.
+    assert len(result.spring.get_data_positions()) == len(designer.target_displacement)
 
 
 if __name__ == "__main__":

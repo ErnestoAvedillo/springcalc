@@ -484,13 +484,17 @@ class ConicalCurveCompressionSpringInverseDesigner:
         rmse = float(np.sqrt(np.mean((predicted_load - self.target_load) ** 2)))
         norm_rmse = rmse / self._target_load_scale
 
-        # Register the two extreme working lengths from the target curve
-        # with the real spring so its own stress-at-position machinery (not
-        # the search's approximation) supplies the reported safety factor.
-        length_hi = free_length_mm - max_displacement
-        length_lo = free_length_mm - float(self.target_displacement.min())
-        spring.add_load_position(length_hi * ureg.mm)
-        spring.add_load_position(length_lo * ureg.mm)
+        # Register every point of the target curve (not just its two
+        # extremes) with the real spring, so its own stress-at-position
+        # machinery (not the search's approximation) supplies both the
+        # reported safety factor and the full set of points a later report
+        # can list/plot. Cheap despite the loop: add_load_position ->
+        # calculate_load_at_position always simulates with the same
+        # (free_length, steps=500) key, so only the first call pays for the
+        # simulation and the rest hit VariableLinealSpring's single-entry
+        # cache.
+        for displacement_mm in self.target_displacement:
+            spring.add_load_position((free_length_mm - float(displacement_mm)) * ureg.mm)
         safety_factor = self._analyzer(wire_diameter_mm).calculate_safety_factor(
             spring.get_stress_max(), spring.get_stress_min())
 
