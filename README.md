@@ -45,9 +45,9 @@ from springcalc import Material, CompressionSpring
 material = Material(material_name="SH")
 spring = CompressionSpring(material=material, wire_diameter=1.0)
 spring.set_geometry(outer_diameter=10.0, free_length=50.0, nr_coils=10)
-properties = compression_spring.get_spring_data()
-    for key, value in properties.items():
-        print(f"{key}: {value}")                       )
+properties = spring.get_spring_data()
+for key, value in properties.items():
+    print(f"{key}: {value}")
 ```
 
 Generating a PDF report (spring data, load/travel/diameter curves, and the
@@ -72,7 +72,7 @@ report.build("spring_report.pdf")
 - [PDF reports](#pdf-reports) — `SpringPDFReport`
 - [Advanced: variable-geometry springs](#advanced-variable-geometry-springs) — `VariableLinealSpring`, `CompressionSpringGeneral`
 - [Animating progressive compression](#animating-progressive-compression) — `CompressionAnimator`
-- [Inverse design](#inverse-design) — `CompressionSpringInverseDesigner`, `ConicalCompressionSpringInverseDesigner`, `ConicalCurveCompressionSpringInverseDesigner`
+- [Inverse design](#inverse-design) — `CompressionSpringInverseDesigner`, `ConicalCompressionSpringInverseDesigner`, `ConicalCurveCompressionSpringInverseDesigner`, `GeneralCompressionSpringInverseDesigner`
 
 All physical quantities are [`pint`](https://pint.readthedocs.io/) `Quantity`
 objects (a number with a unit, e.g. `20.0 millimeter`). Plain numbers passed
@@ -209,7 +209,7 @@ for length_mm in [30, 40, 50, 60, 70, 80, 90, 100]:
     spring.add_load_position(length=length_mm)
 
 data = spring.get_spring_data()
-print(data["spring_constant"])          # ~7.09 N / mm
+print(data["spring_constant"])          # ~47.84 N / mm
 print(data["wahl_factor_category"])     # 'green' -> C=11 is in a normal manufacturable range
 
 # Graphs (base64 PNGs, ready to embed in HTML or a PDF)
@@ -399,8 +399,14 @@ model compression springs whose mean diameter and/or pitch vary along their
 length (e.g. conical or barrel springs), by numerically integrating along the
 helix instead of using the constant-geometry closed-form equations. They are
 not exported from the top-level `springcalc` package — import them from their
-modules directly. For a constant-diameter, constant-pitch spring they agree
-with the closed-form `CompressionSpring` results.
+modules directly. Unlike `CompressionSpring`, this class has no active-coil
+correction (no `.calculate_active_coils()`/`.nr_active_coils`): `.nr_coils`
+is used directly wherever `CompressionSpring` would use its (always smaller)
+active-coil count, so even for a constant-diameter, constant-pitch spring
+its results (e.g. `.calculate_spring_constant()`) don't numerically match
+`CompressionSpring`'s for the same `nr_coils` — `type_of_end`/
+`type_conforming` are accepted (and stored) but don't otherwise affect the
+calculation here.
 
 | Method | Description |
 |---|---|
@@ -408,8 +414,7 @@ with the closed-form `CompressionSpring` results.
 | `.establish_geometrical_function(func_D, func_p)` | ...inject custom functions `h -> mean_diameter` and `h -> pitch` (both `Quantity -> Quantity`) for a true variable-geometry spring. |
 | `.set_geometry(func_D, func_p, free_length=None, type_of_end=None, type_conforming=None)` | One-call setup: calls `.establish_geometrical_function(func_D, func_p)`, sets `.free_length`, and optionally `type_of_end` (one of `constants.COMPRESSION_SPRING_END_TYPES`, e.g. `"open_ground"`) and `type_conforming` (one of `constants.FORMING_TYPES`, e.g. `"cold_formed"`) — both default to the spring's current value when omitted. |
 | `.calculate_theta_max()` | Total helix rotation angle (rad) needed to reach `free_length`; also updates `.nr_coils`. |
-| `.calculate_active_coils()` | Number of active coils (`.nr_active_coils`), discounting the ground/squared end coils that don't deform, based on `type_of_end`/`type_conforming` — same formula as `CompressionSpring`. |
-| `.calculate_spring_constant(num_points=500)` | Equivalent stiffness, integrating the local flexibility along the helix over the active coils only (end coils excluded per `.calculate_active_coils()`). |
+| `.calculate_spring_constant(num_points=500)` | Equivalent stiffness, integrating the local flexibility along the entire helix (`.nr_coils`). Unlike `CompressionSpring`, this class has no active-coil correction — end coils aren't excluded, so results are only comparable to `CompressionSpring`'s for end types where that correction is zero. |
 | `.calculate_wire_length(num_points=500)` | Total wire length, integrating the 3D arc length along the helix. |
 | `.calculate_solid_length()` | Solid (fully compressed) length, accounting for coil telescoping/nesting when the diameter varies enough. |
 | `.get_3d_plot(num_points=500, show=False, isometric=True)` | Renders the helix centerline in 3D, following the actual `f_mean_diameter`/`f_pitch` functions (so variable geometries show up as a non-uniform helix); returns a base64 PNG. Defaults to an orthographic isometric view. |
@@ -431,11 +436,10 @@ spring.set_geometry(
 )
 
 spring.calculate_theta_max()
-print(spring.calculate_spring_constant())   # matches G*d^4/(8*D^3*n_active) for constant geometry
-print(spring.nr_active_coils)               # 7.7 (10 total coils minus the non-deforming ground ends)
+print(spring.calculate_spring_constant())   # matches G*d^4/(8*D^3*n) for constant geometry (n = nr_coils, 10 here)
 
 deflection, force, stiffness = spring.simulate_progressive_compression(max_deflection=20 * ureg.mm, steps=20)
-print(force[-1])   # ~52.92 N
+print(force[-1])   # ~40.75 N (still in the linear regime at 20mm out of 60mm free length)
 ```
 
 ### Animating progressive compression
@@ -471,7 +475,7 @@ animator.create_gif(max_deflection=25 * ureg.mm, output_path="compression.gif")
 `springcalc.inverse_calc` (not exported from the top-level `springcalc`
 package — import from its modules directly) works backwards from a target
 spring *rate* or a target force-displacement *curve* to a buildable geometry,
-instead of computing properties from geometry you already chose. All three
+instead of computing properties from geometry you already chose. All four
 designers search the standard wire diameter series
 (`get_standard_wire_diameters()`), score candidates against a target fatigue
 safety factor (via `GoodmanAnalyzer`), and rebuild/verify the winning design
@@ -592,6 +596,50 @@ result = ConicalCurveCompressionSpringInverseDesigner(requirements, seed=0).desi
 
 print(result.curve_rmse, result.curve_rmse_relative)
 print(result.diameter_start, result.diameter_end, result.pitch_start, result.pitch_end)
+```
+
+#### General (arbitrary-profile) spring fit to a full force-displacement curve
+
+`GeneralCompressionSpringInverseDesigner`
+(`springcalc.inverse_calc.general_comp_inv`) is the same curve-fitting idea as
+`ConicalCurveCompressionSpringInverseDesigner`, but for a mean-diameter and
+pitch profile that isn't restricted to a straight taper: `D(h)` and `p(h)` are
+each a monotone cubic (PCHIP) spline through `num_control_points` free
+values, able to represent a barrel/hourglass shape or a non-monotonically
+varying pitch, not just two tapered ends. A spline profile has no closed-form
+winding-angle mapping, so unlike the conical curve designer, every candidate
+the search evaluates is simulated with the library's real, general
+(root-solve-based) machinery — expect this search to take minutes to hours
+rather than seconds, and prefer `ConicalCurveCompressionSpringInverseDesigner`
+whenever a simple taper already fits the target curve.
+
+| Member | Description |
+|---|---|
+| `GeneralCompressionSpringInverseDesigner(requirements, type_of_end=..., type_conforming=..., num_control_points=4, spring_index_bounds=(4.5, 12.0), wire_diameter_bounds=(0.3, 10.0), diameter_bounds=(3.0, 150.0), pitch_bounds=(0.3, 40.0), free_length_margin=(1.05, 3.0), min_coils=2.0, safety_factor_weight=1.0, penalty_weight=0.05, search_num_points=20, search_steps=15, final_num_points=500, final_steps=500, maxiter=15, popsize=6, polish_maxiter=60, seed=None, workers=1, number_cycles=1_000_000, shot_peening=False)` | Construct the designer with the same `CompressionCurveRequirements` used by the conical curve designer. `workers` parallelizes the global search across processes (default 1). |
+| `.design()` | Runs the regression and returns a `GeneralCurveInverseDesign`. |
+| `GeneralCurveInverseDesign.spring` | The winning, fully built `CompressionSpringGeneral`. |
+| `.diameter_control_points` / `.pitch_control_points` / `.control_positions` | The fitted profile's control values (`Quantity` arrays) and the axial positions (`Quantity`, mm) they sit at — there's no single start/end pair for a general shape. |
+| `.diameter_at(h)` / `.pitch_at(h)` | Evaluate the fitted spline at any axial position `h` (a `Quantity`). |
+| `.wire_diameter` / `.free_length` / `.nr_coils` / `.solid_length` | Resulting geometry, as `Quantity`/`float`. |
+| `.safety_factor` / `.safety_factor_target` / `.safety_factor_error` | Achieved vs. target safety factor. |
+| `.curve_rmse` / `.curve_rmse_relative` | Fit quality, same meaning as the conical curve designer's fields. |
+| `.target_displacement` / `.target_load` / `.simulated_displacement` / `.simulated_load` | Both curves as numpy arrays. |
+| `spline_profile(control_h_mm, control_values_mm, free_length_mm)` | Module function: builds a `func_D`/`func_p`-compatible closure for a PCHIP spline through control points — handy for feeding the winning geometry into `CompressionSpringGeneral.set_geometry()` directly. |
+
+```python
+from springcalc.inverse_calc.conical_curve_comp_inv import CompressionCurveRequirements
+from springcalc.inverse_calc.general_comp_inv import GeneralCompressionSpringInverseDesigner
+from springcalc.pymodels.material import Material
+
+material = Material(material_name="SL")
+requirements = CompressionCurveRequirements(
+    material=material, security_factor=1.3, csv_path="target_curve.csv",  # displacement,load columns (mm, N)
+)
+result = GeneralCompressionSpringInverseDesigner(requirements, seed=0).design()
+
+print(result.curve_rmse, result.curve_rmse_relative)
+print(result.diameter_control_points, result.pitch_control_points)
+print(result.diameter_at(result.free_length / 2))
 ```
 
 ## Tests

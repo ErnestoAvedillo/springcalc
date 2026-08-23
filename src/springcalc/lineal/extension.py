@@ -166,18 +166,31 @@ class ExtensionSpring(LinealSpring):
         if provided == 0:
             raise ValueError("You must provide at least one of outer_diameter or inner_diameter")
 
+        # Route through the pydantic-validated outer_diameter/inner_diameter
+        # fields (same pattern as LinealSpring.set_diameter) so a plain
+        # number or a Quantity both end up as a proper mm Quantity before
+        # any arithmetic with self.wire_diameter -- mixing a bare number
+        # with a Quantity in the same expression raises a pint
+        # DimensionalityError instead of treating the number as mm.
+        if outer_diameter is not None:
+            self.outer_diameter = outer_diameter
+            outer_diameter = self.outer_diameter
+        if inner_diameter is not None:
+            self.inner_diameter = inner_diameter
+            inner_diameter = self.inner_diameter
+
         if provided == 2:
             self.mean_diameter = (outer_diameter + inner_diameter) / 2
-            self.wire_diameter = outer_diameter - self.mean_diameter.magnitude
+            self.wire_diameter = outer_diameter - self.mean_diameter
             return self.mean_diameter
 
         if self.wire_diameter <= 0 or self.wire_diameter is None:
             raise ValueError("""The wire diameter must be a positive
                              non-null value to calculate the mean diameter""")
         if inner_diameter is not None:
-            mean_diameter = inner_diameter + self.wire_diameter.magnitude
+            mean_diameter = inner_diameter + self.wire_diameter
         else:
-            mean_diameter = outer_diameter - self.wire_diameter.magnitude
+            mean_diameter = outer_diameter - self.wire_diameter
         self.set_mean_diameter(mean_diameter)
         return self.mean_diameter
 
