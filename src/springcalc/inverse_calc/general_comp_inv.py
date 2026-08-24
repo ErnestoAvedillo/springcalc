@@ -54,7 +54,8 @@ from scipy.optimize import differential_evolution, minimize
 
 from .conical_curve_comp_inv import CompressionCurveRequirements, load_target_curve
 from .lineal_comp_inv import _shear_stress
-from ..lineal.constants import COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
+from ..lineal.constants import COMPRESSION_SPRING_END_TYPES
+from ..lineal.constants import OPEN_GROUND
 from ..lineal.generic_compression import CompressionSpringGeneral
 from ..lineal.goodman import GoodmanAnalyzer, GoodmanData
 from ..pymodels.units import ureg
@@ -132,8 +133,8 @@ class GeneralCompressionSpringInverseDesigner:
     constraint."""
 
     def __init__(self, requirements: CompressionCurveRequirements,
-                 type_of_end: str = COMPRESSION_SPRING_END_TYPES[1],
-                 type_conforming: str = FORMING_TYPES[1],
+                 type_of_end: str = COMPRESSION_SPRING_END_TYPES[OPEN_GROUND],
+                 type_conforming: str = 'cold_formed',
                  num_control_points: int = 4,
                  spring_index_bounds: tuple = (4.5, 12.0),
                  wire_diameter_bounds: tuple = (0.3, 10.0),

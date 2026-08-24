@@ -57,7 +57,8 @@ from scipy.integrate import quad
 from scipy.optimize import brentq, minimize
 
 from .lineal_comp_inv import Requirements, _shear_stress, solve_rate_target
-from ..lineal.constants import COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
+from ..lineal.constants import COMPRESSION_SPRING_END_TYPES
+from ..lineal.constants import OPEN_GROUND
 from ..lineal.generic_compression import CompressionSpringGeneral
 from ..lineal.goodman import GoodmanAnalyzer, GoodmanData
 from ..pymodels.units import ureg
@@ -160,8 +161,8 @@ class ConicalCompressionSpringInverseDesigner:
     preferring the most compact (shortest solid length) taper available."""
 
     def __init__(self, requirements: Requirements,
-                 type_of_end: str = COMPRESSION_SPRING_END_TYPES[1],
-                 type_conforming: str = FORMING_TYPES[1],
+                 type_of_end: str = COMPRESSION_SPRING_END_TYPES[OPEN_GROUND],
+                 type_conforming: str = 'cold_formed',
                  spring_index_bounds: tuple = (4.5, 12.0),
                  taper_ratio_bounds: tuple = (0.3, 1.0),
                  pitch_ratio_bounds: tuple = (0.3, 3.0),

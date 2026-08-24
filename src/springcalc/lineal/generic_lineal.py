@@ -3,7 +3,8 @@ from pint import Quantity
 import numpy as np
 from pydantic import ConfigDict, PrivateAttr, field_validator
 from ..pymodels.units import ureg
-from .constants import COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
+from .constants import COMPRESSION_SPRING_END_TYPES
+from .constants import OPEN_GROUND
 from ..pymodels.wire_characteristics import WireCharacteristics
 from scipy.integrate import quad, cumulative_trapezoid
 from scipy.optimize import brentq
@@ -31,8 +32,8 @@ class VariableLinealSpring(WireCharacteristics):
     mean_diameter_init: Quantity = 0.0 * ureg.mm
     pitch_constant: Quantity = 0.0 * ureg.mm
     wire_length: Quantity = 0.0 * ureg.mm
-    type_of_end: str = COMPRESSION_SPRING_END_TYPES[1]  # open_ground by default
-    type_conforming: str = FORMING_TYPES[1]  # cold_formed by default
+    type_of_end: str = COMPRESSION_SPRING_END_TYPES[OPEN_GROUND]  # open_ground by default
+    type_conforming: str = 'cold_formed'
     theta_max: float = 0.0  # Total helix rotation angle (radians)
 
     # Cache of the last simulate_progressive_compression() call: {"key": (...),

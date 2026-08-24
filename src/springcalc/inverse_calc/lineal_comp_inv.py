@@ -35,7 +35,8 @@ from pint import Quantity
 from scipy.optimize import brentq
 
 from ..lineal.compresion import CompressionSpring
-from ..lineal.constants import COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
+from ..lineal.constants import COMPRESSION_SPRING_END_TYPES
+from ..lineal.constants import OPEN_GROUND, CLOSED_GROUND
 from ..lineal.goodman import GoodmanAnalyzer, GoodmanData
 from ..pymodels.material import Material
 from ..pymodels.units import ureg
@@ -251,8 +252,8 @@ class CompressionSpringInverseDesigner:
     close as possible to a target value."""
 
     def __init__(self, requirements: Requirements,
-                 type_of_end: str = COMPRESSION_SPRING_END_TYPES[1],
-                 type_conforming: str = FORMING_TYPES[1],
+                 type_of_end: str = COMPRESSION_SPRING_END_TYPES[CLOSED_GROUND],
+                 type_conforming: str = 'cold_formed',
                  spring_index_bounds: tuple = (4.5, 12.0),
                  wire_diameter_bounds: tuple = (0.0, float('inf')),
                  min_active_coils: float = 2.0,

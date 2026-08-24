@@ -1,4 +1,4 @@
-from .constants import WAHL_FACTOR_CONSTANTS, COMPRESSION_SPRING_END_TYPES
+from .constants import WAHL_FACTOR_CONSTANTS
 from ..pymodels.wire_characteristics import WireCharacteristics
 from ..pymodels.material import Material
 from ..pymodels.positions import LinearPositionsTable

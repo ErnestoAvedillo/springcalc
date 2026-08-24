@@ -1,7 +1,8 @@
 """Class for calculating a standard compression spring."""
 from math import pi
 from pydantic import field_validator, ConfigDict
-from .constants import COMPRESSION_SPRING_END_TYPES, FORMING_TYPES
+from . import constants as const
+from .constants import COMPRESSION_SPRING_END_TYPES
 from .goodman import Goodman
 import traceback
 from matplotlib import pyplot as plt
@@ -23,9 +24,9 @@ matplotlib.use('Agg')
 class CompressionSpring(LinealSpring):
     # Additional CompressionSpring fields
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
-    type_of_end: str = COMPRESSION_SPRING_END_TYPES[1]  # ground by default
+    type_of_end: str = const.COMPRESSION_SPRING_END_TYPES[const.CLOSED_GROUND]  # ground by default
     # set cold formed by default
-    type_conforming: str = FORMING_TYPES[1]
+    type_conforming: str = 'cold_formed'
     # the wire length should be in mm
     wire_length: Optional[Quantity] = 0.0 * ureg.mm
     nr_coils: Optional[float] = None
@@ -113,18 +114,22 @@ class CompressionSpring(LinealSpring):
         if parameters_provided != 2:
             raise ValueError("You must provide exactly two of the following variables: nr_coils, pitch, free_length")
 
+        end_factors = const.COMPRESSION_END_FACTORS[self.type_of_end]
+        inactive_coils = end_factors['inactive_coils']
+        end_length = end_factors['length_factor'] * self.wire_diameter
+
         if nr_coils is not None and pitch is not None:
             self.nr_coils = nr_coils
             self.pitch = pitch
-            self.free_length = self.nr_coils * self.pitch
+            self.free_length = (self.nr_coils - inactive_coils) * self.pitch + end_length
         elif nr_coils is not None and free_length is not None:
             self.nr_coils = nr_coils
             self.free_length = free_length
-            self.pitch = self.free_length / self.nr_coils
+            self.pitch = (self.free_length - end_length) / (self.nr_coils - inactive_coils)
         elif pitch is not None and free_length is not None:
             self.pitch = pitch
             self.free_length = free_length
-            self.nr_coils = self.free_length / self.pitch
+            self.nr_coils = (self.free_length - end_length) / self.pitch + inactive_coils
         else:
             raise ValueError("You must provide exactly two of the following variables: nr_coils, pitch, free_length")
 
@@ -142,20 +147,8 @@ class CompressionSpring(LinealSpring):
 
     def calculate_active_coils(self, nr_coils):
         """Calculate the number of active spring coils based on the end type."""
-        self.nr_coils = nr_coils
-        # Active coils are calculated only for compression springs.
-        # For hot-formed springs, 1.5 times the wire diameter is subtracted.
-        if self.type_conforming == FORMING_TYPES[1]:  # cold formed
-            self.nr_active_coils = self.nr_coils - 2
-            if self.type_of_end in [COMPRESSION_SPRING_END_TYPES[3], COMPRESSION_SPRING_END_TYPES[4]]:  # unground
-                self.nr_active_coils -= 1.5
-        else:
-            # in case spring is hot formed
-            self.nr_active_coils = self.nr_coils - 1.5
-        if self.type_of_end in [COMPRESSION_SPRING_END_TYPES[1], COMPRESSION_SPRING_END_TYPES[2]]:  # ground
-            self.nr_active_coils -= 0.3
-        else:
-            self.nr_active_coils -= 1.1
+        active_coils_offset = const.COMPRESSION_END_FACTORS[self.type_of_end]['active_coils_offset']
+        self.nr_active_coils = nr_coils - active_coils_offset
         return self.nr_active_coils
 
     def calculate_wire_length(self):

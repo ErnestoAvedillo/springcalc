@@ -7,7 +7,6 @@ Main public API:
 """
 
 from springcalc.lineal.compresion import (CompressionSpring,
-                                          FORMING_TYPES,
                                           COMPRESSION_SPRING_END_TYPES)
 from springcalc.lineal.generic_compression import CompressionSpringGeneral
 from springcalc.lineal.extension import ExtensionSpring
