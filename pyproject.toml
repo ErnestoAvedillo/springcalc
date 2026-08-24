@@ -1,6 +1,6 @@
 [project]
 name = "springcalc"
-version = "0.1.22"
+version = "0.1.23"
 description = "Spring calculation library: compression, extension, and torsion."
 readme = "README.md"
 requires-python = ">=3.11"
