@@ -22,7 +22,7 @@ general N-control-point version, but scipy-only, no extra dependency).
 Why the search doesn't call CompressionSpringGeneral.simulate_progressive_
 compression directly: that method (via get_h_theta_development) solves the
 winding-angle <-> axial-position mapping with one fsolve call per
-discretization point, because it has to support an arbitrary func_D/func_p.
+discretization point, because it has to support an arbitrary f_mean_diameter/f_pitch.
 Measured at only 30 points/20 steps -- already a coarse search resolution --
 a single call took ~9 seconds, which would make a several-thousand-
 evaluation regression take hours. But D(h) and p(h) are linear here, so that
@@ -67,7 +67,7 @@ class CompressionCurveRequirements:
     docstring), and a CSV path holding the target force-displacement curve
     to reproduce."""
     material: Material
-    security_factor: float
+    safety_factor: float
     csv_path: str
 
 
@@ -260,7 +260,6 @@ class ConicalCurveCompressionSpringInverseDesigner:
 
     def __init__(self, requirements: CompressionCurveRequirements,
                  type_of_end: str = COMPRESSION_SPRING_END_TYPES[OPEN_GROUND],
-                 type_conforming: str = 'cold_formed',
                  spring_index_bounds: tuple = (4.5, 12.0),
                  wire_diameter_bounds: tuple = (0.3, 10.0),
                  diameter_bounds: tuple = (3.0, 150.0),
@@ -279,9 +278,8 @@ class ConicalCurveCompressionSpringInverseDesigner:
                  number_cycles: int = 1_000_000,
                  shot_peening: bool = False):
         self.material = requirements.material
-        self.safety_factor_target = requirements.security_factor
+        self.safety_factor_target = requirements.safety_factor
         self.type_of_end = type_of_end
-        self.type_conforming = type_conforming
         self.spring_index_bounds = spring_index_bounds
         self.wire_diameter_bounds = wire_diameter_bounds
         self.diameter_bounds = diameter_bounds
@@ -322,8 +320,8 @@ class ConicalCurveCompressionSpringInverseDesigner:
         # the (many) evaluations at the same diameter within one search.
         cached = self._analyzer_cache.get(wire_diameter_mm)
         if cached is None:
-            goodman_data = GoodmanData(material=self.material, diameter=wire_diameter_mm,
-                                       load_type='torsion', cycles=int(self.number_cycles))
+            goodman_data = GoodmanData(material=self.material, wire_diameter=wire_diameter_mm,
+                                       load_type='torsion', number_cycles=int(self.number_cycles))
             cached = GoodmanAnalyzer(goodman_data, shot_peening=self.shot_peening)
             self._analyzer_cache[wire_diameter_mm] = cached
         return cached
@@ -338,11 +336,10 @@ class ConicalCurveCompressionSpringInverseDesigner:
         spring.number_cycles = self.number_cycles
         spring.shot_peening = self.shot_peening
         spring.set_geometry(
-            func_D=linear_profile(diameter_start_mm, diameter_end_mm, free_length_mm),
-            func_p=linear_profile(pitch_start_mm, pitch_end_mm, free_length_mm),
+            f_mean_diameter=linear_profile(diameter_start_mm, diameter_end_mm, free_length_mm),
+            f_pitch=linear_profile(pitch_start_mm, pitch_end_mm, free_length_mm),
             free_length=free_length_mm * ureg.mm,
             type_of_end=self.type_of_end,
-            type_conforming=self.type_conforming,
         )
         return spring
 

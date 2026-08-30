@@ -1,0 +1,358 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{siunitx}
+\usepackage{cases}
+
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+
+\title{A Mathematical Model for Variable-Geometry Helical\\
+Compression Springs with Contact-Aware Stiffening}
+\author{Derived from the \texttt{CompressionSpringGeneral} implementation}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We formalize the mathematical model underlying a computational class for
+general (possibly variable-diameter) helical compression springs. The model
+covers: the local spring index and Wahl stress-correction factor for a
+spring whose mean coil diameter $D(z)$ varies along its axis; a geometric
+criterion distinguishing \emph{telescoping} (nesting) springs from
+conventional stacking springs, used to predict solid length; a
+piecewise/incremental contact model of progressive compression that
+captures the stiffening produced by coil-to-coil and end-plate contact;
+the resulting position-dependent load, shear stress, and outer/inner
+diameter fields; and a Goodman fatigue-diagram formulation for
+alternating torsional loading. The presentation follows the structure of
+the reference implementation, translating each computational routine into
+its governing equations.
+\end{abstract}
+
+\tableofcontents
+
+\section{Notation and basic geometry}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{cl}
+\toprule
+Symbol & Meaning \\
+\midrule
+$d$ & wire diameter \\
+$D(z)$ & local mean coil diameter at axial coordinate $z$ \\
+$L_0$ & free (unloaded) length of the spring \\
+$L_s$ & solid length \\
+$n$ & number of active coils \\
+$k$ & spring constant (stiffness) \\
+$C(z)$ & local spring index, $C(z) = D(z)/d$ \\
+$K_W(z)$ & Wahl factor at position $z$ \\
+$\delta$ & travel (deflection) from free length \\
+$F$ & axial load \\
+$\tau$ & maximum shear stress in the wire \\
+$\nu$ & Poisson's ratio of the wire material \\
+$N_c$ & number of fatigue cycles \\
+$\sigma_{\max},\sigma_{\min}$ & maximum/minimum alternating shear stress \\
+\bottomrule
+\end{tabular}
+\caption{Principal symbols.}
+\end{table}
+
+A spring occupying the free-length interval $z\in[0,L_0]$ is described by
+a (possibly non-constant) mean-diameter function $D(z)$, generalizing the
+constant-diameter cylindrical spring to conical, barrel, or other
+variable-geometry profiles. Positions are addressed either by their
+absolute coordinate $z$ (``position'', measured from the free/loaded end)
+or by their travel
+\begin{equation}
+\delta = L_0 - z ,
+\label{eq:travel}
+\end{equation}
+i.e.\ the amount by which the spring has been compressed from its free
+length.
+
+\section{Local spring index and the Wahl factor}
+
+\begin{definition}[Local spring index]
+At axial position $z$,
+\begin{equation}
+C(z) = \frac{D(z)}{d}.
+\end{equation}
+\end{definition}
+
+The Wahl factor corrects the elementary torsion formula for a helical
+spring to account for direct shear and coil curvature effects. For local
+spring index $C(z)$,
+\begin{equation}
+K_W(z) = \frac{4C(z)-1}{4C(z)-4} + \frac{0.615}{C(z)} .
+\label{eq:wahl}
+\end{equation}
+
+\begin{remark}
+Equation~\eqref{eq:wahl} is evaluated pointwise using the \emph{local}
+index $C(z)$ rather than a single global index, so that a
+variable-diameter spring receives a position-dependent correction factor
+$K_W(z)$ instead of one constant value.
+\end{remark}
+
+Springs are further classified into qualitative severity bands according
+to threshold values $c_{\mathrm{r}} $ and $c_{\mathrm{o}}$ on the spring
+index:
+\begin{equation}
+\text{category}(z) =
+\begin{cases}
+\text{``red''}, & C(z) < c_{\mathrm r} \\[2pt]
+\text{``orange''}, & c_{\mathrm r} \le C(z) < c_{\mathrm o} \\[2pt]
+\text{``green''}, & C(z) \ge c_{\mathrm o}
+\end{cases}
+\end{equation}
+where $c_{\mathrm r} < c_{\mathrm o}$ are material/design constants,
+flagging low spring indices (tightly wound coils) as more severe because
+the Wahl correction grows sharply as $C\to 1^{+}$.
+
+\section{Solid length: stacking versus telescoping}
+
+When a compression spring is closed completely, its solid length $L_s$
+depends on whether successive coils can nest \emph{inside} one another
+(telescoping, possible for springs whose diameter changes rapidly enough
+along their length, e.g.\ strongly conical springs) or must stack
+\emph{on top of} one another (the conventional case for near-cylindrical
+springs).
+
+\begin{definition}[Telescoping criterion]
+Let
+\begin{equation}
+D_0 = D(0), \qquad D_1 = D(L_0)
+\end{equation}
+be the mean diameters at the two ends of the free length. The spring is
+classified as telescoping when the total diametral change exceeds the
+aggregate wire thickness that would otherwise be needed to stack every
+coil:
+\begin{equation}
+\lvert D_0 - D_1 \rvert \;\ge\; n\,d .
+\label{eq:telescope-criterion}
+\end{equation}
+\end{definition}
+
+\begin{proposition}[Solid length]
+\begin{equation}
+L_s =
+\begin{cases}
+d, & \text{if condition \eqref{eq:telescope-criterion} holds
+(ideal telescoping limit),}\\[4pt]
+n\,d, & \text{otherwise (conventional stacking).}
+\end{cases}
+\label{eq:solid-length}
+\end{equation}
+\end{proposition}
+
+The first branch is the limiting case in which every coil can nest fully
+inside its neighbor, so the compressed stack collapses to a single wire
+diameter; the second is the ordinary case of $n$ coils of diameter $d$
+stacking without interference.
+
+\section{Contact-aware progressive compression}
+
+Rather than assuming a single constant stiffness $k$ over the full travel
+range $\delta \in [0, L_0 - L_s]$, the load--deflection relation is
+obtained from an incremental simulation that can capture stiffening
+transitions caused by (i) coil-to-coil contact and (ii) the moving plate
+or floor approaching the solid stack.
+
+\begin{definition}[Progressive compression map]
+Let $\delta_{\max} = L_0$ and partition $[0,\delta_{\max}]$ into $M$
+increments $0=\delta_0 <\delta_1<\dots<\delta_M=\delta_{\max}$. The
+simulation produces a discrete force history
+\begin{equation}
+\big\{(\delta_i, F_i)\big\}_{i=0}^{M},
+\end{equation}
+in which each $F_i$ is obtained from the instantaneous effective
+stiffness $k_{\mathrm{eff}}(\delta_i)$, itself a function of which coils
+are currently in contact:
+\begin{equation}
+F_i = F_{i-1} + k_{\mathrm{eff}}(\delta_{i-1})\,(\delta_i - \delta_{i-1}),
+\qquad F_0 = 0 .
+\label{eq:incremental-force}
+\end{equation}
+\end{definition}
+
+The continuous load--travel curve used elsewhere in the model,
+\begin{equation}
+F(\delta) \approx \operatorname{interp}\big(\delta;\;\{\delta_i\},\{F_i\}\big),
+\label{eq:interp}
+\end{equation}
+is then recovered from the discrete history by piecewise-linear
+interpolation, and it is this curve — rather than the naive linear
+relation $F = k\delta$ — that supplies the load at any requested
+position.
+
+\begin{remark}
+Because the simulation is expensive relative to interpolation, it is
+evaluated once over the full travel range and reused: both the
+load-at-position query (Section~\ref{sec:load-position}) and the
+diagnostic load--travel/load--position plots draw on the same discrete
+history $\{(\delta_i,F_i)\}$.
+\end{remark}
+
+\section{Load, stress, and diameter at a prescribed position}
+\label{sec:load-position}
+
+\subsection{Load at a position}
+
+For a requested position $z$ with travel $\delta = L_0 - z$
+(Eq.~\eqref{eq:travel}), the load is read from the interpolated
+progressive-compression curve and signed by the loading class
+$s\in\{-1,0,1\}$ (with $s=1$ for compression):
+\begin{equation}
+F(z) = s\cdot F\big(L_0 - z\big).
+\label{eq:load-at-position}
+\end{equation}
+
+\subsection{Shear stress at a position}
+
+The corrected torsional shear stress in the wire uses the elementary
+torsion-of-a-curved-bar formula for a round wire of diameter $d$, scaled
+by the local Wahl factor $K_W(z)$ of Eq.~\eqref{eq:wahl} and the local
+mean diameter $D(z)$:
+\begin{equation}
+\tau(z) = \frac{8\,D(z)\,F(z)}{\pi d^{3}}\,K_W(z).
+\label{eq:stress}
+\end{equation}
+
+\subsection{Outer and inner diameter at a position}
+
+The outer diameter accounts for both the wire cross-section and a
+Poisson-effect radial growth of the coil as the wire is compressed
+axially between the free position and the current position:
+\begin{equation}
+D_{\mathrm{out}}(z) = D(z) + d + D(z)\,\nu\,\frac{L_0 - z}{L_0},
+\label{eq:outer-diameter}
+\end{equation}
+\begin{equation}
+D_{\mathrm{in}}(z) = \max\!\big(D_{\mathrm{out}}(z) - 2d,\; 0\big).
+\label{eq:inner-diameter}
+\end{equation}
+The linear factor $(L_0-z)/L_0 \in [0,1]$ scales the Poisson bulge from
+zero at the free end of travel ($z=L_0$) up to its full value as the
+spring approaches its most compressed recorded position ($z\to 0$).
+
+\subsection{Admissibility of a position}
+
+A requested position $z$ (equivalently a load-position record) is
+physically admissible only if it does not correspond to over-closing the
+spring beyond its solid length:
+\begin{equation}
+z \;\ge\; L_s ,
+\end{equation}
+with $L_s$ given by Eq.~\eqref{eq:solid-length}; violations are rejected.
+
+\section{Extremal quantities over recorded positions}
+
+Given a finite set of recorded load positions
+$\mathcal{P} = \{z_1,\dots,z_p\}$ with associated stresses
+$\tau(z_j)$ and loads $F(z_j)$ from Eqs.~\eqref{eq:stress}
+and~\eqref{eq:load-at-position}, the reported extremes are simply
+\begin{equation}
+\tau_{\max} = \max_{j} \tau(z_j), \qquad
+\tau_{\min} = \min_{j} \tau(z_j),
+\end{equation}
+\begin{equation}
+F_{\max} = \max_{j} F(z_j), \qquad
+F_{\min} = \min_{j} F(z_j).
+\end{equation}
+These extrema define the alternating stress state used for fatigue
+analysis below.
+
+\section{Fatigue analysis: the Goodman criterion}
+
+For a wire loaded in torsion for $N_c$ cycles, define the mean and
+alternating shear stress components from the extremal stresses of the
+duty cycle,
+\begin{equation}
+\tau_m = \frac{\tau_{\max}+\tau_{\min}}{2}, \qquad
+\tau_a = \frac{\tau_{\max}-\tau_{\min}}{2}.
+\label{eq:mean-alt}
+\end{equation}
+
+Let $\tau_e$ denote the torsional endurance limit for $N_c$ cycles
+(material- and surface-treatment–dependent, e.g.\ adjusted for shot
+peening) and $\tau_y$ the torsional yield/ultimate shear strength. The
+modified-Goodman fatigue criterion states that a stress state is safe
+when
+\begin{equation}
+\frac{\tau_a}{\tau_e} + \frac{\tau_m}{\tau_y} \;\le\; 1 .
+\label{eq:goodman}
+\end{equation}
+Equation~\eqref{eq:goodman} defines the Goodman line in the
+$(\tau_m,\tau_a)$ plane; the operating point $(\tau_m,\tau_a)$ computed
+from Eq.~\eqref{eq:mean-alt} is plotted against this line, and its safety
+factor is
+\begin{equation}
+n_f = \left(\frac{\tau_a}{\tau_e} + \frac{\tau_m}{\tau_y}\right)^{-1}.
+\label{eq:safety-factor}
+\end{equation}
+
+\section{Geometric development of the helical centerline}
+
+For visualization and for consistency with the wire-length calculation,
+the coil centerline is parametrized by an angular sweep
+$\theta \in [0, 2\pi n]$ mapped to axial coordinate $z(\theta)$, so that
+at $N$ sample points $\theta_i$ the three-dimensional centerline is
+\begin{equation}
+\begin{aligned}
+x(\theta_i) &= \tfrac12 D\big(z(\theta_i)\big)\cos\theta_i, \\
+y(\theta_i) &= \tfrac12 D\big(z(\theta_i)\big)\sin\theta_i, \\
+z(\theta_i) &= z_i .
+\end{aligned}
+\label{eq:helix}
+\end{equation}
+For a constant-diameter cylindrical spring, $D(z)\equiv D$ and
+Eq.~\eqref{eq:helix} reduces to the standard circular helix; for a
+variable-geometry spring, $D(z)$ modulates the local helix radius,
+producing conical, barrel, or otherwise shaped centerlines while the
+pitch/angular relation $z(\theta)$ is inherited from the underlying
+wire-length development.
+
+\section{Summary of the computational pipeline}
+
+The full property-calculation pipeline composes the results above in the
+following order:
+\begin{enumerate}
+\item Compute base linear-spring properties (stiffness $k$, spring
+index, wire length) from the underlying variable-lineal model.
+\item Evaluate the Wahl factor and category at the reference mid-travel
+position $z = L_0/2$ (Eq.~\eqref{eq:wahl}).
+\item Determine the solid length $L_s$ via the telescoping test
+(Eqs.~\eqref{eq:telescope-criterion}--\eqref{eq:solid-length}).
+\item For each requested position $z_j \ge L_s$: obtain $F(z_j)$ from
+the progressive-compression curve (Eqs.~\eqref{eq:incremental-force}--
+\eqref{eq:load-at-position}), then $\tau(z_j)$
+(Eq.~\eqref{eq:stress}) and $D_{\mathrm{out}}(z_j),D_{\mathrm{in}}(z_j)$
+(Eqs.~\eqref{eq:outer-diameter}--\eqref{eq:inner-diameter}).
+\item Extract $\tau_{\max},\tau_{\min}$ over all recorded positions and
+evaluate the Goodman safety criterion
+(Eqs.~\eqref{eq:mean-alt}--\eqref{eq:safety-factor}).
+\end{enumerate}
+
+\section{Conclusion}
+
+The model presented here reformulates a variable-geometry compression
+spring as: a position-indexed geometric field $D(z)$; a pointwise
+Wahl-corrected torsion law (Eqs.~\eqref{eq:wahl},~\eqref{eq:stress}); a
+combinatorial/geometric criterion selecting between two closed-form
+solid-length regimes (Eq.~\eqref{eq:solid-length}); a discretized,
+contact-aware load--deflection map replacing the classical linear spring
+law (Eqs.~\eqref{eq:incremental-force}--\eqref{eq:interp}); and a
+standard Goodman fatigue criterion applied to the resulting stress
+extremes (Eq.~\eqref{eq:goodman}). Together these equations reproduce,
+in closed mathematical form, the quantities computed and plotted by the
+reference implementation.
+
+\end{document}

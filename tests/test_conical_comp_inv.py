@@ -15,10 +15,10 @@ def material():
     return Material(material_name="SL")
 
 
-def make_requirements(material, security_factor=1.2, length1=60, force1=200, length2=90, force2=50):
+def make_requirements(material, safety_factor=1.2, length1=60, force1=200, length2=90, force2=50):
     return Requirements(
         material=material,
-        security_factor=security_factor,
+        safety_factor=safety_factor,
         length1=length1, force1=force1,
         length2=length2, force2=force2,
     )
@@ -44,12 +44,12 @@ def test_pitch_integral_matches_numeric_quadrature():
 def test_shape_evaluation_hits_target_safety_factor(material):
     requirements = make_requirements(material)
     designer = ConicalCompressionSpringInverseDesigner(requirements)
-    goodman_data = GoodmanData(material=material, diameter=3.0, load_type="torsion", cycles=int(1e6))
+    goodman_data = GoodmanData(material=material, wire_diameter=3.0, load_type="torsion", number_cycles=int(1e6))
     analyzer = GoodmanAnalyzer(goodman_data, shot_peening=False)
 
     candidate = designer._evaluate_shape(tau_D=0.6, tau_p=1.5, wire_diameter_mm=3.0, analyzer=analyzer)
 
-    assert candidate.safety_factor == pytest.approx(requirements.security_factor, abs=1e-4)
+    assert candidate.safety_factor == pytest.approx(requirements.safety_factor, abs=1e-4)
     assert candidate.diameter_end_mm == pytest.approx(candidate.diameter_start_mm * 0.6, rel=1e-9)
     assert candidate.pitch_end_mm == pytest.approx(candidate.pitch_start_mm * 1.5, rel=1e-9)
 
@@ -61,7 +61,7 @@ def test_shape_flexibility_increases_with_taper_so_more_coils_are_needed(materia
     # keep hitting the same target rate.
     requirements = make_requirements(material)
     designer = ConicalCompressionSpringInverseDesigner(requirements)
-    goodman_data = GoodmanData(material=material, diameter=3.2, load_type="torsion", cycles=int(1e6))
+    goodman_data = GoodmanData(material=material, wire_diameter=3.2, load_type="torsion", number_cycles=int(1e6))
     analyzer = GoodmanAnalyzer(goodman_data, shot_peening=False)
 
     no_taper = designer._evaluate_shape(tau_D=1.0, tau_p=1.0, wire_diameter_mm=3.2, analyzer=analyzer)
@@ -74,7 +74,7 @@ def test_shape_flexibility_increases_with_taper_so_more_coils_are_needed(materia
 def test_spring_index_out_of_bounds_is_rejected(material):
     requirements = make_requirements(material)
     designer = ConicalCompressionSpringInverseDesigner(requirements, spring_index_bounds=(4.5, 12.0))
-    goodman_data = GoodmanData(material=material, diameter=3.2, load_type="torsion", cycles=int(1e6))
+    goodman_data = GoodmanData(material=material, wire_diameter=3.2, load_type="torsion", number_cycles=int(1e6))
     analyzer = GoodmanAnalyzer(goodman_data, shot_peening=False)
 
     # Extreme taper pushes the small end's spring index below the bound.
@@ -117,7 +117,7 @@ def test_full_design_matches_target_rate_and_reproduces_load_points(material):
     assert result.free_length.to("mm").magnitude == pytest.approx(
         designer.free_length_target, rel=1e-9
     )
-    assert result.safety_factor == pytest.approx(requirements.security_factor, abs=0.1)
+    assert result.safety_factor == pytest.approx(requirements.safety_factor, abs=0.1)
 
     positions = {round(p.position.to("mm").magnitude, 3): p.load.to("N").magnitude
                  for p in result.spring.get_data_positions()}

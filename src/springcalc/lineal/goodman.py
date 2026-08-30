@@ -15,13 +15,13 @@ from .plotting import interactive_backend
 class GoodmanData(BaseModel):
     """Data model for the Goodman diagram - validation and data only"""
     material: Material
-    diameter: float
+    wire_diameter: float
     load_type: str = "axial"
-    cycles: int = 1e6  # Number of cycles for fatigue analysis, default 1 million
+    number_cycles: int = 1e6  # Number of cycles for fatigue analysis, default 1 million
 
-    @field_validator('diameter', mode='before')
+    @field_validator('wire_diameter', mode='before')
     @classmethod
-    def validate_diameter(cls, v):
+    def validate_wire_diameter(cls, v):
         if isinstance(v, Quantity):
             return float(v.to('mm').magnitude)
         if isinstance(v, (int, float)):
@@ -32,7 +32,7 @@ class GoodmanData(BaseModel):
     @property
     def wire_characteristics(self) -> WireCharacteristics:
         """Wire characteristics computed automatically"""
-        return WireCharacteristics(material=self.material, wire_diameter=self.diameter)
+        return WireCharacteristics(material=self.material, wire_diameter=self.wire_diameter)
 
 
 class GoodmanAnalyzer:
@@ -69,10 +69,10 @@ class GoodmanAnalyzer:
         # size factor
         if self.data.load_type in ["torsion", "flexion"]:
             # Shigley size factor formula using diameter in mm (2.79 mm <= d <= 51 mm)
-            if 2.79 <= self.data.diameter <= 51:
-                self.k_b = 1.24 * (self.data.diameter ** -0.107)
-            elif self.data.diameter > 51:
-                self.k_b = 1.51 * (self.data.diameter ** -0.157)
+            if 2.79 <= self.data.wire_diameter <= 51:
+                self.k_b = 1.24 * (self.data.wire_diameter ** -0.107)
+            elif self.data.wire_diameter > 51:
+                self.k_b = 1.51 * (self.data.wire_diameter ** -0.157)
             else:
                 self.k_b = 1.0
         else:
@@ -95,10 +95,10 @@ class GoodmanAnalyzer:
         self.Sse = self.k_a * self.k_b * self.k_c * self.k_d * self.k_e * self.Sse_prime
         factor_f_model = ModelFactorF()
         self.factor_f = factor_f_model.predict(self.Ssu)
-        if self.data.cycles <= 1e3:
+        if self.data.number_cycles <= 1e3:
             # Low-cycle fatigue strength approximation
-            self.Ssf = self.Sut * (self.data.cycles ** (log10(self.factor_f) / 3))
-        elif self.data.cycles >= 1e6:
+            self.Ssf = self.Sut * (self.data.number_cycles ** (log10(self.factor_f) / 3))
+        elif self.data.number_cycles >= 1e6:
             # Infinite life region
             self.Ssf = self.Sse
         else:
@@ -106,7 +106,7 @@ class GoodmanAnalyzer:
             # S_f = a * N^b, where S_f(10^3) = f * Sut and S_f(10^6) = Sse
             a = ((self.factor_f * self.Sut) ** 2) / self.Sse
             b = -log10((self.factor_f * self.Sut) / self.Sse) / 3
-            self.Ssf = a * (self.data.cycles ** b)
+            self.Ssf = a * (self.data.number_cycles ** b)
     @staticmethod
     def _to_mpa_float(value) -> float:
         if isinstance(value, Quantity):
@@ -132,7 +132,7 @@ class GoodmanAnalyzer:
             fig, ax = plt.subplots(figsize=(10, 8))
 
             # Effective fatigue strength Sn capped at ultimate tensile strength Sut
-            raw_sn = self.Ssf if self.data.cycles < 1e6 else self.Sse
+            raw_sn = self.Ssf if self.data.number_cycles < 1e6 else self.Sse
             Sn = min(raw_sn, self.Sut)
 
             # Intersection point calculation bounded to non-negative values
@@ -179,7 +179,7 @@ class GoodmanAnalyzer:
 
             # Add technical info
             info_text = f"""Goodman Factors:
-        Nr of cycles: {self.data.cycles:.1e}
+        Nr of cycles: {self.data.number_cycles:.1e}
         Correction factors
         kₐ = {self.k_a:.3f}
         k_b = {self.k_b:.3f}
@@ -240,7 +240,7 @@ class GoodmanAnalyzer:
 
         # 2. Select fatigue limit according to target cycle count
         # If cycles < 1e6 se we have to use finite life (Ssf), otherwise Sse.
-        Sn = self.Ssf if self.data.cycles < 1e6 else self.Sse
+        Sn = self.Ssf if self.data.number_cycles < 1e6 else self.Sse
 
         # 3. Fatigue factor of safety (Modified Goodman criterion)
         n_fatigue = 1 / ((amplitude / Sn) + (mean_tension / ultimate))
@@ -263,7 +263,7 @@ class GoodmanAnalyzer:
 
         return {
             'material': self.data.material.material_name,
-            'diameter': self.data.diameter,
+            'wire_diameter': self.data.wire_diameter,
             'load_type': self.data.load_type,
             'factors': {
                 'k_a': self.k_a,
@@ -292,8 +292,8 @@ class GoodmanAnalyzer:
 class Goodman(GoodmanAnalyzer):
     """Backwards-compatibility class - uses the new architecture internally"""
 
-    def __init__(self, material: Material, diameter: float, load_type: str = "axial", number_cycles: int = 1e6, shot_peening: bool = False):
-        data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=number_cycles)
+    def __init__(self, material: Material, wire_diameter: float, load_type: str = "axial", number_cycles: int = 1e6, shot_peening: bool = False):
+        data = GoodmanData(material=material, wire_diameter=wire_diameter, load_type=load_type, number_cycles=number_cycles)
         super().__init__(data, shot_peening=shot_peening)
 
     def plot_goodman_graph(self, sigma_max: float, sigma_min: float):

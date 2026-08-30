@@ -16,11 +16,11 @@ def main():
     material = Material(material_name="DH")
     spring = CompressionSpringGeneral(material=material, wire_diameter=2 * ureg.mm)
     free_length = 70
-    spring.set_geometry(func_D=lambda x: linear(x,
+    spring.set_geometry(f_mean_diameter=lambda x: linear(x,
                                                 upper=20 * ureg.mm,
                                                 lower=60 * ureg.mm,
                                                 free_length=free_length * ureg.mm),
-                        func_p=lambda x: linear(x,
+                        f_pitch=lambda x: linear(x,
                                                 upper=10 * ureg.mm,
                                                 lower=3 * ureg.mm,
                                                 free_length=free_length * ureg.mm),

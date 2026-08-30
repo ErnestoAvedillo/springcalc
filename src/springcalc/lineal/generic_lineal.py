@@ -68,29 +68,25 @@ class VariableLinealSpring(WireCharacteristics):
             self.f_pitch = lambda h: self.pitch_constant
 
     def set_geometry(self,
-                     func_D: Callable[[Quantity], Quantity],
-                     func_p: Callable[[Quantity], Quantity],
+                     f_mean_diameter: Callable[[Quantity], Quantity],
+                     f_pitch: Callable[[Quantity], Quantity],
                      free_length: Quantity,
-                     type_of_end: Optional[str] = 'closed_unground',
-                     type_conforming: Optional[str] = 'cold_formed',
+                     type_of_end: Optional[str] = None,
                      ):
         """Sets the initial geometry for a variable-diameter, variable-pitch spring.
         Parameters:
-            func_D: function that takes height (h) and returns mean diameter at that height
-            func_p: function that takes height (h) and returns pitch at that height.
+            f_mean_diameter: function that takes height (h) and returns mean diameter at that height
+            f_pitch: function that takes height (h) and returns pitch at that height.
             free_length: optional free length of the spring
-            type_of_end: optional end type (e.g., open, closed, ground)
-            type_conforming: optional forming type (e.g., cold formed, hot formed)"""
-        self.establish_geometrical_function(func_D, func_p)
+            type_of_end: optional end type (e.g., open, closed, ground)"""
+        self.establish_geometrical_function(f_mean_diameter, f_pitch)
         self.free_length = free_length.to('mm')
         self.free_length = free_length if free_length is not None else self.free_length
         if type_of_end is not None:
             self.type_of_end = type_of_end
-        if type_conforming is not None:
-            self.type_conforming = type_conforming
 
         # Invalidate everything derived from the previous geometry, so the
-        # next calculation recomputes against func_D/func_p/free_length
+        # next calculation recomputes against f_mean_diameter/f_pitch/free_length
         # instead of silently reusing stale numbers from a prior call (e.g.
         # if this spring instance is reconfigured and reused).
         self.theta_max = 0.0
@@ -100,11 +96,11 @@ class VariableLinealSpring(WireCharacteristics):
         self._progressive_compression_cache = None
 
     def establish_geometrical_function(self,
-                                       func_D: Callable[[Quantity], Quantity],
-                                       func_p: Callable[[Quantity], Quantity]):
+                                       f_mean_diameter: Callable[[Quantity], Quantity],
+                                       f_pitch: Callable[[Quantity], Quantity]):
         """Allows injecting any variable geometry into the spring"""
-        self.f_mean_diameter = func_D
-        self.f_pitch = func_p
+        self.f_mean_diameter = f_mean_diameter
+        self.f_pitch = f_pitch
 
     def calculate_spring_index_local(self, h: Quantity) -> float:
         """The spring index now depends on which part (h) of the spring you measure"""

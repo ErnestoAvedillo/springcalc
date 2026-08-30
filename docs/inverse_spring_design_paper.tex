@@ -1,0 +1,387 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+\newtheorem{corollary}{Corollary}
+
+\title{Inverse Design of Cylindrical Compression Springs\\
+from a Target Rate and Fatigue Safety Factor}
+\author{Derived from the \texttt{CompressionSpringInverseDesigner} implementation}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We formalize an inverse-design procedure for standard cylindrical helical
+compression springs. Given a linear rate target — specified either by two
+exact length/force points or by a least-squares fit to several noisy
+length/force samples — together with a target fatigue safety factor, the
+procedure recovers a wire diameter, mean coil diameter, number of coils,
+and free length that reproduce the rate exactly while matching the safety
+factor as closely as possible. The search exploits two structural facts:
+(i) for a fixed pair of load points the wire stress depends only on the
+wire and mean diameters, so the number of coils can always be chosen
+after the fact to hit the rate exactly; and (ii) for fixed wire diameter,
+the fatigue safety factor is monotonic in the mean diameter away from the
+spring-index singularity at $C=4$, so it may be inverted by one-dimensional
+root finding. The outer loop is a brute-force scan over a discrete
+standard wire-diameter series, each of whose candidates is validated
+against buildability constraints (minimum coil count, non-bottoming solid
+length, non-interfering pitch) before selection.
+\end{abstract}
+
+\tableofcontents
+
+\section{Problem statement}
+
+\subsection{Design requirements}
+
+The design brief consists of a material, a target fatigue safety factor
+$n_f^{\star}$, and a target linear rate specified in one of two
+equivalent forms:
+
+\begin{itemize}
+\item \textbf{Two-point form:} two distinct (length, force) pairs
+$(\ell_1, F_1)$, $(\ell_2, F_2)$ on the spring's pre-contact linear
+regime;
+\item \textbf{Sample form:} a set of $m\ge 2$ measured pairs
+$\{(\ell_i, F_i)\}_{i=1}^m$, assumed noisy but linear, from which the
+rate is estimated by least squares.
+\end{itemize}
+
+\subsection{Design variables and target quantities}
+
+The free geometric variables are the wire diameter $d$, the mean coil
+diameter $D$, the number of active coils $n_a$ (equivalently, total
+coils $n = n_a + n_0$ for an end/forming--dependent offset $n_0$), and
+the free length $L_0$. The design must reproduce a target spring rate
+$k^{\star}$ and free length $L_0^{\star}$ exactly, while bringing the
+fatigue safety factor $n_f(d,D)$, evaluated at the two extreme load
+points, as close as possible to $n_f^{\star}$.
+
+\section{Recovering the rate target}
+
+\subsection{Exact two-point solve}
+
+A compression spring's pre-contact force--deflection relation is linear,
+\begin{equation}
+F(\ell) = k\,(L_0 - \ell),
+\label{eq:linear-law}
+\end{equation}
+where $\ell$ is the compressed length and $L_0$ the free length. Given
+two distinct points $(\ell_1,F_1)$, $(\ell_2,F_2)$ with, without loss of
+generality, $\ell_1 < \ell_2$ (so $F_1 > F_2$ for a valid compression
+spring), Eq.~\eqref{eq:linear-law} is fully determined:
+\begin{equation}
+k = \frac{F_1 - F_2}{\ell_2 - \ell_1},
+\label{eq:rate-two-point}
+\end{equation}
+\begin{equation}
+L_0 = \ell_1 + \frac{F_1}{k}.
+\label{eq:free-length-two-point}
+\end{equation}
+Equation~\eqref{eq:free-length-two-point} is the zero-force extrapolation
+of the line back from the more-compressed (higher-force) point. We write
+$\ell_{\mathrm{lo}} = \ell_1$, $F_{\mathrm{hi}}=F_1$,
+$\ell_{\mathrm{hi}}=\ell_2$, $F_{\mathrm{lo}}=F_2$ for the ordered pair
+used later as the two representative operating points.
+
+\subsection{Least-squares solve from multiple samples}
+
+Given $m \ge 2$ samples $\{(\ell_i,F_i)\}$ with at least two distinct
+lengths, fit
+\begin{equation}
+F(\ell) \approx a\,\ell + b
+\label{eq:ls-line}
+\end{equation}
+by ordinary least squares,
+\begin{equation}
+(a,b) = \operatorname*{arg\,min}_{a,b}\ \sum_{i=1}^{m}\big(F_i - a\ell_i - b\big)^2 .
+\end{equation}
+A valid compression-spring fit requires $a<0$; the rate and free length
+are then read off the fitted line exactly as in the two-point case,
+\begin{equation}
+k = -a, \qquad L_0 = -\frac{b}{a}.
+\label{eq:rate-ls}
+\end{equation}
+The two representative operating points are taken at the extreme sampled
+lengths $\ell_{\mathrm{lo}}=\min_i \ell_i$, $\ell_{\mathrm{hi}}=\max_i \ell_i$,
+using the \emph{fitted} forces
+\begin{equation}
+F_{\mathrm{hi}} = a\,\ell_{\mathrm{lo}} + b, \qquad
+F_{\mathrm{lo}} = a\,\ell_{\mathrm{hi}} + b,
+\label{eq:ls-endpoints}
+\end{equation}
+rather than the raw measured values, so downstream stress checks stay
+consistent with the fitted line.
+
+\begin{remark}
+For $m=2$, Eq.~\eqref{eq:ls-line} passes through both points exactly, so
+Eqs.~\eqref{eq:rate-ls}--\eqref{eq:ls-endpoints} reduce to
+Eqs.~\eqref{eq:rate-two-point}--\eqref{eq:free-length-two-point}: the
+least-squares path strictly generalizes the two-point path.
+\end{remark}
+
+\section{Stress model}
+
+\subsection{Wahl factor and shear stress}
+
+For spring index $C = D/d$, the Wahl correction factor is
+\begin{equation}
+K_W(C) = \frac{4C-1}{4C-4} + \frac{0.615}{C},
+\label{eq:wahl}
+\end{equation}
+and the corrected shear stress in a round wire under axial load $F$ is
+\begin{equation}
+\tau(D,d,F) = \frac{8\,D\,F}{\pi d^{3}}\,K_W\!\left(\frac{D}{d}\right).
+\label{eq:stress}
+\end{equation}
+Equation~\eqref{eq:stress} depends on the geometry only through $(D,d)$
+and is evaluated at the two representative operating loads
+$F_{\mathrm{hi}}, F_{\mathrm{lo}}$ to obtain the operating stress range
+\begin{equation}
+\tau_{\mathrm{hi}} = \tau(D,d,F_{\mathrm{hi}}), \qquad
+\tau_{\mathrm{lo}} = \tau(D,d,F_{\mathrm{lo}}).
+\label{eq:stress-extremes}
+\end{equation}
+
+\subsection{Fatigue safety factor}
+
+Given a Goodman fatigue model for the material (endurance limit,
+ultimate strength, cycle count, and optional shot-peening correction),
+the safety factor is a function
+\begin{equation}
+n_f = n_f(\tau_{\mathrm{hi}}, \tau_{\mathrm{lo}}) ,
+\label{eq:safety-factor-def}
+\end{equation}
+computed from the mean and alternating components
+$\tau_m = (\tau_{\mathrm{hi}}+\tau_{\mathrm{lo}})/2$,
+$\tau_a = (\tau_{\mathrm{hi}}-\tau_{\mathrm{lo}})/2$
+against the modified-Goodman line, as in the companion compression-spring
+model. Composing with Eq.~\eqref{eq:stress-extremes} gives the safety
+factor purely as a function of the two free diameters,
+\begin{equation}
+n_f = n_f(D,d) .
+\label{eq:safety-factor-Dd}
+\end{equation}
+
+\section{Coil count from the rate target}
+
+\subsection{Closed-form active-coil count}
+
+The classical helical-spring rate formula,
+\begin{equation}
+k = \frac{G\,d^{4}}{8\,D^{3}\,n_a},
+\label{eq:rate-formula}
+\end{equation}
+with $G$ the material shear modulus, is solved for the number of active
+coils $n_a$ once $(D,d)$ and the target rate $k^{\star}$
+(Eqs.~\eqref{eq:rate-two-point} or~\eqref{eq:rate-ls}) are fixed:
+\begin{equation}
+n_a(D,d) = \frac{G\,d^{4}}{8\,D^{3}\,k^{\star}}.
+\label{eq:active-coils}
+\end{equation}
+
+\begin{proposition}
+For any admissible pair $(D,d)$ with $D,d>0$, Eq.~\eqref{eq:active-coils}
+supplies a coil count that reproduces the target rate exactly. Hence the
+rate constraint never restricts the search over $(D,d)$: it is satisfied
+identically by the choice of $n_a$.
+\end{proposition}
+
+\subsection{Total coil count}
+
+The total coil count adds an end/forming-dependent constant offset
+$n_0$ (encoding, e.g., closed-and-ground versus plain ends):
+\begin{equation}
+n = n_a(D,d) + n_0 .
+\label{eq:total-coils}
+\end{equation}
+
+\section{Reduction to a one-dimensional search}
+\label{sec:reduction}
+
+Because $n_a$ is fully determined by $(D,d)$ through
+Eq.~\eqref{eq:active-coils}, the design problem reduces to choosing
+$(D,d)$ so that
+\begin{equation}
+n_f(D,d) = n_f^{\star}
+\label{eq:target-equation}
+\end{equation}
+as closely as possible, subject to buildability constraints
+(Section~\ref{sec:constraints}). The wire diameter $d$ is restricted to a
+discrete standard series $\mathcal{D}_{\mathrm{std}}$ (e.g.\ from a
+diameter/tolerance table), so the two-dimensional search over $(D,d)$
+decomposes into
+\[
+|\mathcal{D}_{\mathrm{std}} \cap [d_{\min}, d_{\max}]|
+\]
+independent one-dimensional root-finding problems in $D$, one per
+candidate $d$.
+
+\begin{proposition}[Monotonicity]
+\label{prop:monotonic}
+For fixed $d$, the stress $\tau(D,d,F)$ of Eq.~\eqref{eq:stress} is
+increasing in $D$ away from the singular spring index $C=4$ (where $K_W$
+diverges), since both the explicit factor $D$ and the Wahl factor
+$K_W(D/d)$ increase with $D$ in this regime. Consequently the safety
+factor $n_f(D,d)$, which decreases with increasing operating stresses, is
+monotonically decreasing in $D$ over any spring-index interval bounded
+away from $C=4$.
+\end{proposition}
+
+\begin{corollary}
+On an index bracket $[C_{\min},C_{\max}]$ not containing $C=4$, with
+corresponding diameter bracket $[D_{\min},D_{\max}] = [C_{\min}d,\,
+C_{\max}d]$, Eq.~\eqref{eq:target-equation} may be solved for $D$ by
+standard bracketed root-finding (e.g.\ Brent's method) whenever
+\begin{equation}
+\big(n_f(D_{\min},d) - n_f^{\star}\big)\big(n_f(D_{\max},d) - n_f^{\star}\big) \le 0 .
+\label{eq:bracket-condition}
+\end{equation}
+\end{corollary}
+
+\begin{remark}
+When condition~\eqref{eq:bracket-condition} fails, the target safety
+factor is unreachable for this $d$ within the allowed index range; the
+nearer of the two bracket endpoints is reported instead, i.e.
+\begin{equation}
+D^{*}(d) = \operatorname*{arg\,min}_{D\in\{D_{\min},D_{\max}\}}
+\big|n_f(D,d) - n_f^{\star}\big| .
+\end{equation}
+\end{remark}
+
+\section{Buildability constraints}
+\label{sec:constraints}
+
+A candidate $(D,d)$, with implied $n_a$ from Eq.~\eqref{eq:active-coils}
+and $n$ from Eq.~\eqref{eq:total-coils}, is rejected unless all of the
+following hold.
+
+\paragraph{Minimum coil count.}
+\begin{equation}
+n_a \ge n_a^{\min}.
+\label{eq:min-coils}
+\end{equation}
+
+\paragraph{Non-bottoming solid length.}
+The fully closed (solid) length,
+\begin{equation}
+L_s = n\,d,
+\label{eq:solid-length-inv}
+\end{equation}
+must not reach or exceed the shortest working length in the target
+duty cycle:
+\begin{equation}
+L_s < \ell_{\mathrm{lo}}.
+\label{eq:no-bottom}
+\end{equation}
+
+\paragraph{Non-interfering pitch.}
+The nominal coil pitch at free length,
+\begin{equation}
+p = \frac{L_0^{\star}}{n},
+\label{eq:pitch}
+\end{equation}
+must exceed the wire diameter, so that coils do not already touch at
+free length:
+\begin{equation}
+p > d.
+\label{eq:pitch-constraint}
+\end{equation}
+
+A candidate satisfying Eqs.~\eqref{eq:min-coils},
+\eqref{eq:no-bottom}, and~\eqref{eq:pitch-constraint} is \emph{valid}.
+
+\section{Selection among candidates}
+
+\subsection{Per-diameter candidate}
+
+For each standard wire diameter $d\in\mathcal{D}_{\mathrm{std}}$ within
+the allowed bounds, Section~\ref{sec:reduction} yields a candidate mean
+diameter $D^{*}(d)$, spring index $C^{*}(d)=D^{*}(d)/d$, and achieved
+safety factor $n_f^{*}(d) = n_f(D^{*}(d),d)$, together with a validity
+flag from Section~\ref{sec:constraints}.
+
+\subsection{Selection rule}
+
+Let $\mathcal{V}\subseteq\mathcal{D}_{\mathrm{std}}$ be the subset of
+diameters yielding a valid candidate, and let
+\begin{equation}
+C_{\mathrm{mid}} = \frac{C_{\min}+C_{\max}}{2}
+\end{equation}
+be the midpoint of the allowed spring-index range. The selected design
+minimizes, lexicographically,
+\begin{equation}
+d^{\star} = \operatorname*{arg\,min}_{d \in \mathcal{V}}
+\Big(\ \big|n_f^{*}(d) - n_f^{\star}\big|,\ \ \big|C^{*}(d) - C_{\mathrm{mid}}\big|\ \Big),
+\label{eq:selection-rule}
+\end{equation}
+i.e.\ closeness to the target safety factor is the primary criterion,
+and closeness of the spring index to the middle of its admissible range
+breaks (near-)ties.
+
+\begin{remark}
+If $\mathcal{V}=\varnothing$ — no standard wire diameter admits a valid
+geometry within the allowed spring-index and wire-diameter bounds for
+this rate/safety-factor target — the design problem has no feasible
+solution under the stated bounds, and the bounds must be relaxed.
+\end{remark}
+
+\section{Algorithm summary}
+
+\begin{algorithm}[h]
+\caption{Inverse compression-spring design}
+\begin{algorithmic}[1]
+\Require material, $n_f^{\star}$, rate target data, bounds $[C_{\min},C_{\max}]$, $[d_{\min},d_{\max}]$
+\State Compute $(\ell_{\mathrm{lo}}, F_{\mathrm{hi}}, \ell_{\mathrm{hi}}, F_{\mathrm{lo}}, k^{\star}, L_0^{\star})$ via Eqs.~\eqref{eq:rate-two-point}--\eqref{eq:free-length-two-point} or~\eqref{eq:rate-ls}--\eqref{eq:ls-endpoints}
+\For{each $d \in \mathcal{D}_{\mathrm{std}} \cap [d_{\min},d_{\max}]$}
+    \State Set bracket $[D_{\min},D_{\max}] = [C_{\min}d, C_{\max}d]$
+    \State Solve Eq.~\eqref{eq:target-equation} for $D^{*}(d)$ by root finding (Eq.~\eqref{eq:bracket-condition}) or take the nearer bound
+    \State Compute $n_f^{*}(d)$, $C^{*}(d) = D^{*}(d)/d$
+    \State Compute $n_a$ (Eq.~\eqref{eq:active-coils}), $n$ (Eq.~\eqref{eq:total-coils})
+    \State Validate against Eqs.~\eqref{eq:min-coils},~\eqref{eq:no-bottom},~\eqref{eq:pitch-constraint}
+\EndFor
+\State Select $d^{\star}$ by Eq.~\eqref{eq:selection-rule} among valid candidates
+\State \Return geometry $(d^{\star}, D^{*}(d^{\star}), n(d^{\star}), L_0^{\star})$
+\end{algorithmic}
+\end{algorithm}
+
+\section{Output characterization}
+
+The returned design carries, beyond the geometry itself, a signed
+error relative to the target,
+\begin{equation}
+\Delta n_f = n_f^{*}(d^{\star}) - n_f^{\star},
+\label{eq:safety-error}
+\end{equation}
+with $\Delta n_f>0$ indicating a design more conservative than requested
+and $\Delta n_f<0$ indicating a shortfall, together with the full
+per-diameter candidate list (valid or not, with rejection reasons where
+applicable) for traceability of the selection.
+
+\section{Conclusion}
+
+The inverse design problem — four unknown geometric parameters
+constrained by one rate equation and one fatigue-safety target —
+decomposes cleanly because the rate equation is linear in the coil count
+(Eq.~\eqref{eq:active-coils}) and the fatigue constraint is monotonic in
+the mean diameter for fixed wire diameter away from the $C=4$
+singularity (Proposition~\ref{prop:monotonic}). This reduces a nominally
+under-determined nonlinear system to a finite family of independent
+scalar root-finding problems indexed by a discrete standard wire-diameter
+series, each screened by simple geometric buildability inequalities
+(Eqs.~\eqref{eq:min-coils}, \eqref{eq:no-bottom},
+\eqref{eq:pitch-constraint}) before the closest-to-target candidate is
+selected by Eq.~\eqref{eq:selection-rule}.
+
+\end{document}

@@ -63,7 +63,7 @@ from ..pymodels.wire_characteristics import get_standard_wire_diameters
 
 
 def spline_profile(control_h_mm: np.ndarray, control_values_mm: np.ndarray, free_length_mm: float):
-    """A func_D/func_p-compatible closure following a monotone cubic (PCHIP)
+    """A f_mean_diameter/f_pitch-compatible closure following a monotone cubic (PCHIP)
     spline through (control_h_mm, control_values_mm). `h` is clamped to
     [0, free_length_mm] first, the same convention conical_comp_inv.
     linear_profile uses, so callers evaluating slightly outside the spring's
@@ -134,7 +134,6 @@ class GeneralCompressionSpringInverseDesigner:
 
     def __init__(self, requirements: CompressionCurveRequirements,
                  type_of_end: str = COMPRESSION_SPRING_END_TYPES[OPEN_GROUND],
-                 type_conforming: str = 'cold_formed',
                  num_control_points: int = 4,
                  spring_index_bounds: tuple = (4.5, 12.0),
                  wire_diameter_bounds: tuple = (0.3, 10.0),
@@ -158,9 +157,8 @@ class GeneralCompressionSpringInverseDesigner:
         if num_control_points < 2:
             raise ValueError("num_control_points must be at least 2")
         self.material = requirements.material
-        self.safety_factor_target = requirements.security_factor
+        self.safety_factor_target = requirements.safety_factor
         self.type_of_end = type_of_end
-        self.type_conforming = type_conforming
         self.num_control_points = num_control_points
         self.spring_index_bounds = spring_index_bounds
         self.wire_diameter_bounds = wire_diameter_bounds
@@ -200,8 +198,8 @@ class GeneralCompressionSpringInverseDesigner:
         the same candidate diameter."""
         cached = self._analyzer_cache.get(wire_diameter_mm)
         if cached is None:
-            goodman_data = GoodmanData(material=self.material, diameter=wire_diameter_mm,
-                                       load_type='torsion', cycles=int(self.number_cycles))
+            goodman_data = GoodmanData(material=self.material, wire_diameter=wire_diameter_mm,
+                                       load_type='torsion', number_cycles=int(self.number_cycles))
             cached = GoodmanAnalyzer(goodman_data, shot_peening=self.shot_peening)
             self._analyzer_cache[wire_diameter_mm] = cached
         return cached
@@ -216,11 +214,10 @@ class GeneralCompressionSpringInverseDesigner:
         spring.number_cycles = self.number_cycles
         spring.shot_peening = self.shot_peening
         spring.set_geometry(
-            func_D=spline_profile(control_h_mm, diameter_control_mm, free_length_mm),
-            func_p=spline_profile(control_h_mm, pitch_control_mm, free_length_mm),
+            f_mean_diameter=spline_profile(control_h_mm, diameter_control_mm, free_length_mm),
+            f_pitch=spline_profile(control_h_mm, pitch_control_mm, free_length_mm),
             free_length=free_length_mm * ureg.mm,
             type_of_end=self.type_of_end,
-            type_conforming=self.type_conforming,
         )
         return spring
 

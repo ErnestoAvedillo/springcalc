@@ -54,7 +54,7 @@ class Requirements:
     rate/free-length by the designer classes in this module and the conical
     variants."""
     material: Material
-    security_factor: float
+    safety_factor: float
     length1: Optional[float] = None
     length2: Optional[float] = None
     force1: Optional[float] = None
@@ -200,12 +200,12 @@ def solve_rate_target(requirements: Requirements) -> RateTarget:
                       force_lo=force_lo, spring_constant=spring_constant, free_length=free_length)
 
 
-def _active_coils_offset(type_of_end: str, type_conforming: str) -> float:
+def _active_coils_offset(type_of_end: str) -> float:
     """Reuse CompressionSpring.calculate_active_coils to get the constant
-    offset between nr_coils and nr_active_coils for the given end/forming
-    types, instead of re-deriving that formula here."""
+    offset between nr_coils and nr_active_coils for the given end type,
+    instead of re-deriving that formula here."""
     probe = CompressionSpring(material=Material(material_name="SL"), wire_diameter=1.0,
-                              type_of_end=type_of_end, type_conforming=type_conforming)
+                              type_of_end=type_of_end)
     return -probe.calculate_active_coils(nr_coils=0)
 
 
@@ -253,7 +253,6 @@ class CompressionSpringInverseDesigner:
 
     def __init__(self, requirements: Requirements,
                  type_of_end: str = COMPRESSION_SPRING_END_TYPES[CLOSED_GROUND],
-                 type_conforming: str = 'cold_formed',
                  spring_index_bounds: tuple = (4.5, 12.0),
                  wire_diameter_bounds: tuple = (0.0, float('inf')),
                  min_active_coils: float = 2.0,
@@ -261,13 +260,12 @@ class CompressionSpringInverseDesigner:
                  shot_peening: bool = False):
         self.material = requirements.material
         self.type_of_end = type_of_end
-        self.type_conforming = type_conforming
         self.spring_index_bounds = spring_index_bounds
         self.wire_diameter_bounds = wire_diameter_bounds
         self.min_active_coils = min_active_coils
         self.number_cycles = number_cycles
         self.shot_peening = shot_peening
-        self.safety_factor_target = requirements.security_factor
+        self.safety_factor_target = requirements.safety_factor
 
         rate = solve_rate_target(requirements)
         self.length_lo, self.force_hi = rate.length_lo, rate.force_hi
@@ -275,7 +273,7 @@ class CompressionSpringInverseDesigner:
         self.spring_constant_target = rate.spring_constant
         self.free_length_target = rate.free_length
 
-        self._coil_offset = _active_coils_offset(type_of_end, type_conforming)
+        self._coil_offset = _active_coils_offset(type_of_end)
 
     def _active_coils(self, mean_diameter_mm: float, wire_diameter_mm: float) -> float:
         """Number of active coils that gives this (mean diameter, wire
@@ -325,8 +323,8 @@ class CompressionSpringInverseDesigner:
         c_lo, c_hi = self.spring_index_bounds
         d_lo, d_hi = c_lo * wire_diameter_mm, c_hi * wire_diameter_mm
 
-        goodman_data = GoodmanData(material=self.material, diameter=wire_diameter_mm,
-                                   load_type='torsion', cycles=int(self.number_cycles))
+        goodman_data = GoodmanData(material=self.material, wire_diameter=wire_diameter_mm,
+                                   load_type='torsion', number_cycles=int(self.number_cycles))
         analyzer = GoodmanAnalyzer(goodman_data, shot_peening=self.shot_peening)
 
         def f(mean_diameter_mm: float) -> float:
@@ -383,14 +381,13 @@ class CompressionSpringInverseDesigner:
         # behavior (stress at arbitrary positions, etc.), not just the
         # numbers used during the search.
         spring = CompressionSpring(material=self.material, wire_diameter=best.wire_diameter_mm * ureg.mm,
-                                   type_of_end=self.type_of_end, type_conforming=self.type_conforming)
+                                   type_of_end=self.type_of_end)
         spring.number_cycles = self.number_cycles
         spring.shot_peening = self.shot_peening
         spring.set_geometry(mean_diameter=best.mean_diameter_mm * ureg.mm,
                             nr_coils=nr_coils,
                             free_length=self.free_length_target * ureg.mm,
-                            type_of_end=self.type_of_end,
-                            type_conforming=self.type_conforming)
+                            type_of_end=self.type_of_end)
         spring.add_load_position(self.length_lo * ureg.mm)
         spring.add_load_position(self.length_hi * ureg.mm)
 

@@ -22,7 +22,7 @@ def test_goodman():
 
     # 2. Option A: use the new architecture (recommended)
     print("\n--- Method 1: New architecture ---")
-    data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=1e5)
+    data = GoodmanData(material=material, wire_diameter=diameter, load_type=load_type, number_cycles=1e5)
     analyzer = GoodmanAnalyzer(data)
 
     # Define the operating point
@@ -32,7 +32,7 @@ def test_goodman():
     # Show the analysis info
     summary = analyzer.get_analysis_summary(sigma_max, sigma_min)
     print(f"Material: {summary['material']}")
-    print(f"Diameter: {summary['diameter']} mm")
+    print(f"Diameter: {summary['wire_diameter']} mm")
     print(f"Load type: {summary['load_type']}")
     print(f"Safety factor: {summary['safety_factor']:.2f}")
     print(f"RMa min: {summary['strengths']['RMa_min_MPa']:.1f} MPa")
@@ -45,7 +45,7 @@ def test_goodman():
 
     # 3. Option B: use the backwards-compatibility class
     print("\n--- Method 2: Backwards compatibility ---")
-    goodman_legacy = Goodman(material=material, diameter=diameter, load_type=load_type)
+    goodman_legacy = Goodman(material=material, wire_diameter=diameter, load_type=load_type)
     print("Testing the legacy plot_diagram method...")
     goodman_legacy.plot_diagram(sigma_max, sigma_min)
 
@@ -88,7 +88,7 @@ def test_comparacion_materiales():
     for mat_name in materiales:
         try:
             material = Material(material_name=mat_name)
-            data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=1e4)
+            data = GoodmanData(material=material, wire_diameter=diameter, load_type=load_type, number_cycles=1e4)
             analyzer = GoodmanAnalyzer(data)
             sf = analyzer.calculate_safety_factor(sigma_max, sigma_min)
 
@@ -108,7 +108,7 @@ def test_factorf():
     diameters = pd['diameter'].values
     valores_sf =[]
     for diameter in diameters:
-        data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=10000)
+        data = GoodmanData(material=material, wire_diameter=diameter, load_type=load_type, number_cycles=10000)
         analyzer = GoodmanAnalyzer(data)
         valores_sf.append(analyzer.Ssf)
         print(f"Diameter: {diameter:.2f} mm → Sf: {analyzer.Ssf:.1f} MPa")
@@ -129,7 +129,7 @@ def test_factorf():
         valores_sf = []
         valores_se = []
         for cycle in cycles:
-            data = GoodmanData(material=material, diameter=diameter, load_type=load_type, cycles=cycle)
+            data = GoodmanData(material=material, wire_diameter=diameter, load_type=load_type, number_cycles=cycle)
             analyzer = GoodmanAnalyzer(data)
             print(f"Diameter: {diameter:.2f} mm, Cycles: {cycle:.0f} → Sf: {analyzer.Ssf:.1f} MPa")
             valores_sf.append(analyzer.Ssf)

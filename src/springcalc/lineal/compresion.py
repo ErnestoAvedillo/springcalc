@@ -64,8 +64,7 @@ class CompressionSpring(LinealSpring):
                      nr_coils: float = None,
                      pitch: float = None,
                      free_length: float = None,
-                     type_of_end: Optional[str] = 'closed_unground',
-                     type_conforming: Optional[str] = 'cold_formed'):
+                     type_of_end: Optional[str] = None):
         """Set the spring's full geometry in one call.
         Provide the general geometry parameters and characteristics of the spring
         Computes and stores every derived spring property and calls calculate_spring_properties().
@@ -80,7 +79,6 @@ class CompressionSpring(LinealSpring):
             free_length: free length of the spring (mm)
         Optional parameters:
             type_of_end: type of end of the spring ('open_ground','closed_ground','open_unground','closed_unground')
-            type_conforming: type of conforming of the spring ('cold_formed','hot_formed')
 
         Returns:
         A dictionary with all the spring properties, including the derived ones.
@@ -95,8 +93,6 @@ class CompressionSpring(LinealSpring):
 
         if type_of_end is not None:
             self.type_of_end = type_of_end
-        if type_conforming is not None:
-            self.type_conforming = type_conforming
 
         self.set_diameter(mean_diameter=mean_diameter,
                           outer_diameter=outer_diameter,
@@ -457,9 +453,9 @@ class CompressionSpring(LinealSpring):
             # Prepare data for Goodman.
             goodman_data = GoodmanData(
                 material=self.material,
-                diameter=self.wire_diameter,
+                wire_diameter=self.wire_diameter,
                 load_type='torsion',
-                cycles=int(self.number_cycles)
+                number_cycles=int(self.number_cycles)
             )
 
             analyzer = GoodmanAnalyzer(goodman_data,

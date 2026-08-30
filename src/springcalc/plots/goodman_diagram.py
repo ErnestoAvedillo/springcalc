@@ -22,7 +22,7 @@ def generate_goodman_diagram(spring, initial_length, final_length, shot_peening=
         # Create the Goodman analysis
         goodman_data = GoodmanData(
             material=spring.material,
-            diameter=spring.wire_diameter,
+            wire_diameter=spring.wire_diameter,
             load_type="torsion",  # For helical springs this is torsional load
             number_cycles=number_cycles
         )

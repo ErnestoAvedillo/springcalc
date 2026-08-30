@@ -1,0 +1,459 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+\newtheorem{lemma}{Lemma}
+
+\DeclareMathOperator{\RMSE}{RMSE}
+
+\title{Curve-Fitting Inverse Design of a Linearly-Tapered\\
+Conical Compression Spring}
+\author{Derived from the \texttt{ConicalCurveCompressionSpringInverseDesigner} implementation}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We formalize a regression-based inverse-design procedure for a
+linearly-tapered (diameter and pitch) helical compression spring that
+must reproduce an entire target force--displacement curve, rather than
+two points on its linear regime. Because the curve's nonlinear shape —
+the progressive stiffening produced by coil-to-coil and floor contact —
+is exactly what encodes the taper, no closed-form solve is available;
+instead six geometric parameters (wire diameter, free length, start/end
+diameters, start/end pitches) are fit by minimizing a composite objective
+combining curve-fit error, a soft fatigue-safety-factor penalty, and a
+geometric-feasibility penalty. We first derive a closed-form winding-angle
+parametrization for a spring whose pitch varies linearly along its axis,
+which replaces a per-point root solve in the general contact-aware
+simulator with an explicit exponential map, making thousands of candidate
+evaluations inside a global optimizer tractable. We then formalize the
+incremental, flexibility-weighted contact simulation used to generate a
+candidate's force--displacement curve, the composite regression
+objective, and the two-stage (global, then locally polished) optimization
+strategy used to solve it.
+\end{abstract}
+
+\tableofcontents
+
+\section{Problem statement}
+
+\subsection{Design requirements}
+
+The design brief consists of a material, a target fatigue safety factor
+$n_f^{\star}$ (entered as a soft objective term, not a hard constraint),
+and a target curve of $N$ samples
+\begin{equation}
+\big\{(\delta_i, F_i)\big\}_{i=1}^{N}, \qquad \delta_1 < \delta_2 < \dots < \delta_N,
+\end{equation}
+where $\delta_i$ is displacement (travel) from the free length and $F_i$
+the corresponding load.
+
+\subsection{Design variables}
+
+The spring's diameter and pitch are assumed to vary linearly along its
+axial coordinate $h\in[0,L_0]$ (free length $L_0$ itself unknown):
+\begin{equation}
+D(h) = D_0 + \frac{D_1 - D_0}{L_0}\,h, \qquad
+p(h) = p_0 + \frac{p_1 - p_0}{L_0}\,h,
+\label{eq:linear-profiles}
+\end{equation}
+with $D_0,D_1$ the start/end mean diameters and $p_0,p_1$ the start/end
+pitches. Together with the wire diameter $d$ and $L_0$, the design vector
+is
+\begin{equation}
+x = (d,\, L_0,\, D_0,\, D_1,\, p_0,\, p_1) \in \mathbb{R}^6 .
+\label{eq:design-vector}
+\end{equation}
+
+\begin{remark}
+Unlike the two-point (algebraic) designer for the constant-taper case,
+here the rate and its evolution under contact are not linear in the
+unknowns, so $x$ cannot be solved for directly; it must be fit by
+optimization against the whole curve.
+\end{remark}
+
+\section{Closed-form winding-angle parametrization for a linear pitch profile}
+\label{sec:closed-form}
+
+\subsection{General relation between winding angle and axial position}
+
+For any pitch profile $p(h)$, the winding angle $\theta$ accumulated
+while advancing from the fixed end to axial position $h$ satisfies
+\begin{equation}
+\theta(h) = \int_0^h \frac{2\pi}{p(s)}\,ds .
+\label{eq:theta-general}
+\end{equation}
+In the general (arbitrary $p(\cdot)$) case, Eq.~\eqref{eq:theta-general}
+must be inverted numerically — one root solve per discretization point —
+which is the dominant cost of the general contact-aware simulator when
+evaluated at the resolution a global search requires.
+
+\subsection{Closed form for a linear pitch profile}
+
+\begin{proposition}
+Let $p(h) = p_0 + \alpha h$ with $\alpha = (p_1-p_0)/L_0$ the pitch slope.
+For $\alpha \neq 0$,
+\begin{equation}
+\theta(h) = \frac{2\pi}{\alpha}\,\ln\!\frac{p(h)}{p_0},
+\label{eq:theta-h}
+\end{equation}
+which inverts explicitly to
+\begin{equation}
+h(\theta) = \frac{p_0}{\alpha}\left(\exp\!\Big(\frac{\alpha\theta}{2\pi}\Big) - 1\right).
+\label{eq:h-theta}
+\end{equation}
+For $\alpha \to 0$ (constant pitch), Eqs.~\eqref{eq:theta-h}--\eqref{eq:h-theta}
+degenerate to the linear relation
+\begin{equation}
+\theta(h) = \frac{2\pi h}{p_0}, \qquad h(\theta) = \frac{p_0\,\theta}{2\pi}.
+\label{eq:theta-h-linear}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Substituting $p(s) = p_0 + \alpha s$ into Eq.~\eqref{eq:theta-general} and
+integrating,
+\[
+\theta(h) = \frac{2\pi}{\alpha}\Big[\ln(p_0+\alpha s)\Big]_0^{h}
+= \frac{2\pi}{\alpha}\ln\frac{p_0+\alpha h}{p_0} = \frac{2\pi}{\alpha}\ln\frac{p(h)}{p_0},
+\]
+which is Eq.~\eqref{eq:theta-h}. Solving for $h$ gives
+Eq.~\eqref{eq:h-theta}. Taking $\alpha\to 0$ in
+Eq.~\eqref{eq:theta-general} directly, with $p(s)\equiv p_0$, gives
+Eq.~\eqref{eq:theta-h-linear}, which is also the limit of
+Eqs.~\eqref{eq:theta-h}--\eqref{eq:h-theta} by L'Hôpital's rule.
+\end{proof}
+
+\begin{remark}
+Equation~\eqref{eq:h-theta} lets the discretization be sampled uniformly
+in winding angle $\theta$ — matching the convention of the general
+simulator, so per-turn indexing (points separated by one full winding
+turn) still lines up — while avoiding a numerical root solve at every
+sample. The maximum winding angle is $\theta_{\max} = \theta(L_0)$ from
+Eq.~\eqref{eq:theta-h}, and small numerical excursions of
+$h(\theta_{\max})$ outside $[0,L_0]$ are clipped back into range.
+\end{remark}
+
+\section{Fast contact-aware progressive compression simulation}
+\label{sec:fast-sim}
+
+Given the closed-form samples $\{(\theta_j, h_j)\}_{j=1}^{M}$ from
+Section~\ref{sec:closed-form} and the corresponding local radii
+$r_j = D(h_j)/2$ (via Eq.~\eqref{eq:linear-profiles}), the spring is
+compressed in $S$ fixed axial-displacement increments
+$\Delta = L_0/S$, tracking, at each step $t$, a cumulative per-point
+axial displacement $y_j^{(t)}$ and an activity flag $a_j^{(t)}\in\{0,1\}$
+indicating whether point $j$ is still elastically compliant.
+
+\subsection{Coil-to-coil contact}
+
+Let $q$ denote the number of discretization points per full winding turn
+(so index $j$ and $j+q$ sample the same angular phase one turn apart).
+At step $t$, the actual (post-deformation) axial position of point $j$ is
+\begin{equation}
+z_j^{(t)} = h_j - y_j^{(t)} ,
+\end{equation}
+and the axial gap to the point one turn above is
+\begin{equation}
+\pi_j^{(t)} = \big|z_{j+q}^{(t)} - z_j^{(t)}\big| .
+\label{eq:axial-gap}
+\end{equation}
+With radial offset $\Delta r_j = |r_{j+q} - r_j|$ (nonzero because the
+diameter tapers), two coils of wire diameter $d$ can approach only until
+their centerlines are $d$ apart in three dimensions. If $\Delta r_j < d$,
+the axial component of that minimum separation is, by the Pythagorean
+relation $d^2 = \Delta r_j^2 + \pi_j^{\lim\,2}$,
+\begin{equation}
+\pi_j^{\lim} = \sqrt{\max\!\big(d^2 - \Delta r_j^2,\ 0\big)} .
+\label{eq:pz-limit}
+\end{equation}
+Contact is detected when $\pi_j^{(t)} \le \pi_j^{\lim}$, in which case
+every point in the index range $[j,\,j+q]$ — the entire turn between the
+two contacting points — is frozen for the remainder of the step:
+\begin{equation}
+\pi_j^{(t)} \le \pi_j^{\lim} \implies a_k^{(t)} = 0 \ \text{ for all } k\in[j,j+q].
+\label{eq:contact-freeze}
+\end{equation}
+
+\subsection{Floor contact}
+
+Any point other than the fixed end ($j\ne 0$) whose actual axial position
+has reached or passed zero has bottomed out:
+\begin{equation}
+z_j^{(t)} \le 0 \ (j \ne 0) \implies a_j^{(t)} = 0 .
+\label{eq:floor-contact}
+\end{equation}
+
+\subsection{Instantaneous stiffness and load increment}
+
+The local torsional flexibility per unit winding angle at point $j$,
+from the standard helical-spring torsion relation, is
+\begin{equation}
+\phi_j = \frac{8\,D(h_j)^3}{G\,d^{4}\,2\pi},
+\label{eq:local-flexibility}
+\end{equation}
+with $G$ the material shear modulus. Weighting by activity and
+integrating over winding angle gives the total instantaneous flexibility
+\begin{equation}
+\Phi^{(t)} = \int_{0}^{\theta_{\max}} \phi(\theta)\,a^{(t)}(\theta)\,d\theta ,
+\label{eq:total-flexibility}
+\end{equation}
+(evaluated by quadrature over the sampled points), and the instantaneous
+stiffness is $k^{(t)} = 1/\Phi^{(t)}$ (or $+\infty$ if
+$\Phi^{(t)}\approx 0$, i.e.\ every point has gone rigid). The load
+increment over this step is
+\begin{equation}
+F^{(t)} = F^{(t-1)} + k^{(t-1)}\,\Delta ,
+\label{eq:load-increment}
+\end{equation}
+a small-step linearization of the piecewise-changing stiffness, and the
+simulation terminates early if $k^{(t)}=\infty$ (the geometry is fully
+solid-packed or floored, so no further deflection is possible).
+
+\subsection{Deflection sharing across active points}
+
+Within a step, the applied deflection increment $\Delta$ is distributed
+across active points in proportion to their share of the total
+flexibility — the series-spring analogy in which a stiffer (less
+flexible) point accepts less of an applied displacement:
+\begin{equation}
+w_j^{(t)} = \frac{\phi_j\,a_j^{(t)}}{\Phi^{(t)}},
+\qquad
+Y_j^{(t)} = \int_0^{\theta_j} w^{(t)}(\theta)\,d\theta,
+\label{eq:deformation-share}
+\end{equation}
+(the second integral evaluated by cumulative quadrature over the sampled
+winding angles), and the cumulative per-point displacement is updated as
+\begin{equation}
+y_j^{(t+1)} = y_j^{(t)} + Y_j^{(t)}\,\Delta .
+\label{eq:cumulative-update}
+\end{equation}
+
+\begin{remark}
+Equations~\eqref{eq:axial-gap}--\eqref{eq:cumulative-update} reproduce,
+point for point, the contact-detection and load-sharing logic of the
+general (arbitrary-profile) progressive-compression simulator; the only
+substitution is the closed-form sampling of
+Section~\ref{sec:closed-form} in place of a per-point numerical inversion
+of Eq.~\eqref{eq:theta-general}. The simulation is therefore a faithful,
+not merely approximate, model of the linear-taper geometry — its
+computational advantage over the general method is restricted to how the
+discretization points are generated, not to any change in the physics.
+\end{remark}
+
+\section{Regression objective}
+\label{sec:objective}
+
+\subsection{Curve-fit error}
+
+Given a candidate $x$ from Eq.~\eqref{eq:design-vector}, run the
+simulation of Section~\ref{sec:fast-sim} to obtain a predicted curve
+$(\hat\delta_k,\hat F_k)$, resample it at the target's own displacement
+points by linear interpolation,
+\begin{equation}
+\hat F(\delta_i) = \operatorname{interp}\big(\delta_i;\ \{\hat\delta_k\},\{\hat F_k\}\big),
+\end{equation}
+and compute the root-mean-square error against the target curve,
+\begin{equation}
+\RMSE(x) = \sqrt{\frac{1}{N}\sum_{i=1}^N \big(\hat F(\delta_i) - F_i\big)^2}.
+\label{eq:rmse}
+\end{equation}
+Normalizing by the target curve's typical magnitude,
+\begin{equation}
+\bar F = \max\!\left(\frac{1}{N}\sum_{i=1}^N |F_i|,\ \varepsilon\right)
+\qquad (\varepsilon = 10^{-6}),
+\end{equation}
+gives a unitless relative error
+\begin{equation}
+\widetilde{\RMSE}(x) = \frac{\RMSE(x)}{\bar F},
+\label{eq:norm-rmse}
+\end{equation}
+comparable across curves of very different force ranges.
+
+\subsection{Soft fatigue penalty}
+
+At the two extremes of the target displacement range, the critical-section
+stresses are evaluated using the local diameter of
+Eq.~\eqref{eq:linear-profiles} and the simulated load there, via the
+Wahl-corrected torsion formula (as in the companion designer papers),
+yielding a safety factor $n_f(x)$ from the Goodman criterion. The
+deviation from target enters the objective as a soft penalty,
+\begin{equation}
+\Pi_{\mathrm{fatigue}}(x) = \big|n_f(x) - n_f^{\star}\big| .
+\label{eq:fatigue-penalty}
+\end{equation}
+
+\subsection{Geometric feasibility penalty}
+
+Let $C_{\min},C_{\max}$ bound the admissible spring index and $n^{\min}$
+the minimum coil count. With coil count
+\begin{equation}
+n(x) = \frac{L_0}{p_0}\int_0^1 \frac{p_0}{p(u L_0)/p_0}\,du
+\end{equation}
+(the linear-taper analogue of active coils, from integrating winding
+turns along the taper) and solid length
+\begin{equation}
+L_s(x) =
+\begin{cases}
+d, & |D_0-D_1| \ge n(x)\,d \quad \text{(telescoping)}, \\
+n(x)\,d, & \text{otherwise (stacking)},
+\end{cases}
+\label{eq:solid-length-curve}
+\end{equation}
+(the same criterion as Eq.~\eqref{eq:solid-length-inv} of the point-based
+designer, applied at both taper ends), the feasibility penalty sums four
+smoothly-vanishing (squared, one-sided) violation terms:
+\begin{align}
+\Pi_{\mathrm{geom}}(x) = {}& \sum_{D\in\{D_0,D_1\}}\Big[\max(0, C_{\min}-D/d)^2 + \max(0, D/d-C_{\max})^2\Big] \notag\\
+&+ \sum_{p\in\{p_0,p_1\}} \max(0, d-p)^2 \notag \\
+&+ \max\!\big(0,\ n^{\min}-n(x)\big)^2
++ \max\!\big(0,\ L_s(x) - \ell_{\mathrm{hi}}\big)^2 ,
+\label{eq:geometry-penalty}
+\end{align}
+where $\ell_{\mathrm{hi}} = L_0 - \delta_{\min}$ is the shortest length
+the target curve exercises (from the smallest target displacement
+$\delta_{\min}$). Each term vanishes at its constraint boundary and grows
+quadratically beyond it, so the penalty is continuous and
+"differentiable-ish" — supporting the local polish stage of
+Section~\ref{sec:optimization} — rather than a hard reject.
+
+\subsection{Composite objective}
+
+The full objective minimized by the search is
+\begin{equation}
+J(x) = \widetilde{\RMSE}(x) + w_f\,\Pi_{\mathrm{fatigue}}(x) + w_g\,\Pi_{\mathrm{geom}}(x),
+\label{eq:composite-objective}
+\end{equation}
+with weights $w_f,w_g>0$, and any evaluation failure (a degenerate or
+numerically invalid candidate geometry) is assigned a large constant
+value $J=10^{6}$ so the optimizer treats it as strictly worse than any
+successful evaluation without terminating the search.
+
+\section{Two-stage optimization}
+\label{sec:optimization}
+
+\subsection{Search bounds}
+
+Each of the six design variables is bounded: wire diameter and taper
+diameters/pitches within user-supplied ranges, and free length within a
+margin of the target curve's maximum displacement $\delta_{\max}$,
+\begin{equation}
+L_0 \in \big[m_{\mathrm{lo}}\,\delta_{\max},\ m_{\mathrm{hi}}\,\delta_{\max}\big], \qquad m_{\mathrm{lo}} > 1,
+\label{eq:free-length-bounds}
+\end{equation}
+the lower margin exceeding unity because the spring cannot be compressed
+past its own free length.
+
+\subsection{Global stage}
+
+The composite objective $J(x)$ (Eq.~\eqref{eq:composite-objective}),
+evaluated with a coarse simulation resolution
+(Section~\ref{sec:fast-sim} at reduced point/step counts), is minimized
+over the bounded box by a derivative-free global optimizer (differential
+evolution),
+\begin{equation}
+x^{(0)} = \operatorname*{arg\,min}_{x \in \mathcal{B}} J(x),
+\label{eq:global-stage}
+\end{equation}
+$\mathcal{B}\subset\mathbb{R}^6$ the bound box of
+Section~\ref{sec:objective}--\ref{eq:free-length-bounds}. This handles
+the non-convex, discontinuous (due to the contact-freezing logic)
+landscape of $J$ without requiring gradients.
+
+\subsection{Diameter snapping and local polish}
+
+The continuous wire diameter $d^{(0)}$ from $x^{(0)}$ is snapped to the
+nearest manufacturable size in a standard series $\mathcal{D}_{\mathrm{std}}$,
+\begin{equation}
+d^{\star} = \operatorname*{arg\,min}_{d \in \mathcal{D}_{\mathrm{std}}} \big|d - d^{(0)}\big| .
+\label{eq:diameter-snap}
+\end{equation}
+Holding $d=d^{\star}$ fixed, the remaining five parameters
+$y = (L_0,D_0,D_1,p_0,p_1)$ are then re-optimized locally by a
+derivative-free simplex method (Nelder--Mead), started from $x^{(0)}$'s
+values, to recover fit quality lost by the diameter snap:
+\begin{equation}
+y^{\star} = \operatorname*{arg\,min}_{y} J\big(d^{\star}, y\big).
+\label{eq:local-polish}
+\end{equation}
+
+\subsection{Final verification}
+
+The optimized geometry $(d^{\star}, y^{\star})$ is rebuilt using the
+general, contact-aware spring model at full (fine) simulation resolution
+— not the fast closed-form approximation of Section~\ref{sec:fast-sim} —
+and its curve, stresses, and Goodman safety factor are recomputed from
+that unmodified machinery, at every target displacement point (not just
+the two curve extremes), so that everything reported to the caller is
+verified rather than approximated.
+
+\begin{algorithm}[h]
+\caption{Curve-fitting inverse design of a linear-taper conical spring}
+\begin{algorithmic}[1]
+\Require material, target curve $\{(\delta_i,F_i)\}$, $n_f^{\star}$, bounds
+\State Normalize $\bar F$ from the target curve; set search resolution (coarse) and final resolution (fine)
+\State $x^{(0)} \gets$ global minimization of $J$ (Eq.~\eqref{eq:composite-objective}) via differential evolution over $\mathcal{B}$ (coarse simulation, Section~\ref{sec:fast-sim})
+\State $d^{\star} \gets$ nearest standard wire diameter to $x^{(0)}$'s wire diameter (Eq.~\eqref{eq:diameter-snap})
+\State $y^{\star} \gets$ local Nelder--Mead re-fit of the remaining five parameters at $d=d^{\star}$ (Eq.~\eqref{eq:local-polish})
+\State Build the general contact-aware spring at $(d^{\star},y^{\star})$; simulate at fine resolution
+\State Register every target displacement as a load position on the real spring; recompute safety factor from its own stress machinery
+\State \Return spring, geometry, curve fit ($\RMSE$, $\widetilde{\RMSE}$), safety factor, both curves
+\end{algorithmic}
+\end{algorithm}
+
+\section{Discussion}
+
+\begin{proposition}
+The closed-form map of Eqs.~\eqref{eq:theta-h}--\eqref{eq:h-theta}
+reduces the per-evaluation cost of the contact simulation from one
+root-finding call per discretization point to a single vectorized
+exponential evaluation, without altering the contact-detection or
+load-sharing physics of Section~\ref{sec:fast-sim}, which are identical
+to the general (arbitrary-profile) simulator. It is this reduction that
+makes a several-thousand-evaluation global search
+(Eq.~\eqref{eq:global-stage}) computationally tractable at all, since the
+general per-point-fsolve simulator would otherwise dominate the total
+search time by orders of magnitude.
+\end{proposition}
+
+\begin{remark}
+The design problem is over-determined in the sense that a full curve —
+not merely a rate and a free length — must be matched by only six
+parameters under a linear-taper assumption; consequently the fitted
+curve should be expected to approximate, rather than exactly reproduce,
+target curves that are not themselves the output of a linear-taper
+geometry. The quantities $\RMSE(x^{\star})$ and
+$\widetilde{\RMSE}(x^{\star})$ of Eq.~\eqref{eq:rmse}--\eqref{eq:norm-rmse},
+evaluated on the final verified curve, report the residual fit quality
+for exactly this reason.
+\end{remark}
+
+\section{Conclusion}
+
+The inverse curve-fitting design problem for a linearly-tapered
+compression spring is solved by (i) an exact reparametrization of the
+winding angle for linear pitch profiles
+(Eqs.~\eqref{eq:theta-h}--\eqref{eq:h-theta}), which makes a
+high-fidelity contact simulation cheap enough to evaluate thousands of
+times; (ii) a discrete-step, flexibility-weighted simulation of
+progressive coil-to-coil and floor contact
+(Eqs.~\eqref{eq:axial-gap}--\eqref{eq:cumulative-update}) that produces
+each candidate's force--displacement curve; (iii) a composite objective
+blending normalized curve-fit error, a soft fatigue-safety-factor term,
+and a smooth geometric-feasibility penalty
+(Eq.~\eqref{eq:composite-objective}); and (iv) a two-stage
+global-then-local optimization (Eqs.~\eqref{eq:global-stage}--\eqref{eq:local-polish})
+that respects a discrete manufacturable wire-diameter series while
+recovering as much fit quality as the continuous parameters allow.
+
+\end{document}

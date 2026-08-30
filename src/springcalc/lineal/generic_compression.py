@@ -205,9 +205,9 @@ class CompressionSpringGeneral(VariableLinealSpring):
 
             goodman_data = GoodmanData(
                 material=self.material,
-                diameter=self.wire_diameter,
+                wire_diameter=self.wire_diameter,
                 load_type='torsion',
-                cycles=int(self.number_cycles)
+                number_cycles=int(self.number_cycles)
             )
 
             analyzer = GoodmanAnalyzer(goodman_data,

@@ -15,9 +15,13 @@ def _build_constant_geometry_spring():
     """A constant-diameter, constant-pitch spring should behave like a regular one."""
     material = Material(material_name="SH")
     spring = CompressionSpringGeneral(material=material, wire_diameter=2.0)
-    spring.set_geometry(func_D=lambda x: 20 * ureg.mm, func_p=lambda x: 6 * ureg.mm, free_length=60 * ureg.mm)
+    spring.set_geometry(f_mean_diameter=lambda x: 20 * ureg.mm, f_pitch=lambda x: 6 * ureg.mm, free_length=60 * ureg.mm)
     std_spring = CompressionSpring(material=material, wire_diameter=2.0)
-    std_spring.set_geometry(mean_diameter=20 * ureg.mm, pitch=6 * ureg.mm, free_length=60 * ureg.mm)
+    # open_ground: no inactive end coils / end-length correction, so nr_coils
+    # (and everything derived from it) is directly comparable to
+    # CompressionSpringGeneral's ideal-helix numbers below.
+    std_spring.set_geometry(mean_diameter=20 * ureg.mm, pitch=6 * ureg.mm, free_length=60 * ureg.mm,
+                            type_of_end="open_ground")
     positions = [30, 50]
     for pos in positions:
         spring.add_load_position(length=pos * ureg.mm)
@@ -55,7 +59,7 @@ def test_theta_max_matches_coil_count():
     assert spring.nr_coils == pytest.approx(10)
 
 
-def test_2K_constant_pitch(x: Quantity):
+def two_zone_constant_pitch(x: Quantity):
     if not isinstance(x, Quantity):
         x = x * ureg.mm
     if x.magnitude < 0 or x.magnitude > 100:
@@ -72,8 +76,8 @@ def test_2K_constant_pitch(x: Quantity):
 def test_simulate_progressive_compression():
     spring = _build_constant_geometry_spring()
 
-    spring.set_geometry(func_D=lambda x: 20 * ureg.mm,
-                        func_p=lambda x: test_2K_constant_pitch(x),
+    spring.set_geometry(f_mean_diameter=lambda x: 20 * ureg.mm,
+                        f_pitch=lambda x: two_zone_constant_pitch(x),
                         free_length=100 * ureg.mm)
 
     deflection, force, stiffness = spring.simulate_progressive_compression(
@@ -155,8 +159,8 @@ def test_progressive_pitch():
     material = Material(material_name="SH")
     spring = CompressionSpringGeneral(material=material, wire_diameter=2.0)
 
-    spring.set_geometry(func_D=lambda x: 20 * ureg.mm,
-                        func_p=lambda x: cuadratic_pitch(x,
+    spring.set_geometry(f_mean_diameter=lambda x: 20 * ureg.mm,
+                        f_pitch=lambda x: cuadratic_pitch(x,
                                                          min_pitch=2.1 * ureg.mm,
                                                          max_pitch=8.0 * ureg.mm,
                                                          free_length=130 * ureg.mm,

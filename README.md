@@ -4,7 +4,11 @@ A Python library for **spring calculations**: compression, extension, and
 torsion springs. Includes material data, wire characteristic calculations,
 and fatigue analysis via the Goodman diagram.
 
-Visit the library in my guithub https://github.com/ErnestoAvedillo/springcalc  and clone my repository using:
+Number of downloads: [![PyPI Downloads](https://img.shields.io/pypi/dm/springcalc)](https://pypi.org/project/springcalc/)
+
+Want to help? Contact me at eacarretero@gmail.com
+
+Visit the library on my github https://github.com/ErnestoAvedillo/springcalc  and clone the repository using:
 
     git clone git@github.com:ErnestoAvedillo/springcalc.git
 
@@ -175,7 +179,7 @@ used by `ExtensionSpring`.
 | Method | Description |
 |---|---|
 | `CompressionSpring(material, wire_diameter, **data)` | Create the spring. |
-| `.set_geometry(mean_diameter=None, outer_diameter=None, inner_diameter=None, nr_coils=None, pitch=None, free_length=None, type_of_end=None, type_conforming=None)` | Set the full geometry in one call: exactly one diameter and exactly two of `nr_coils`/`pitch`/`free_length`. `type_of_end` (one of `constants.COMPRESSION_SPRING_END_TYPES`, e.g. `"open_ground"`) and `type_conforming` (one of `constants.FORMING_TYPES`, e.g. `"cold_formed"`) are optional and, if given, override the spring's defaults before the active-coil count is computed. Equivalent to calling `.set_diameter()` followed by `.calculate_spring_properties()`. Returns `.get_spring_data()`. |
+| `.set_geometry(mean_diameter=None, outer_diameter=None, inner_diameter=None, nr_coils=None, pitch=None, free_length=None, type_of_end=None)` | Set the full geometry in one call: exactly one diameter and exactly two of `nr_coils`/`pitch`/`free_length`. `type_of_end` (one of `constants.COMPRESSION_SPRING_END_TYPES`, e.g. `"open_ground"`) is optional and, if given, overrides the spring's default before the active-coil count is computed. Equivalent to calling `.set_diameter()` followed by `.calculate_spring_properties()`. Returns `.get_spring_data()`. |
 | `.set_diameter(mean_diameter=None, outer_diameter=None, inner_diameter=None)` | Set exactly one of the three diameters; derives the others and the spring index/Wahl factor. |
 | `.calculate_spring_properties(nr_coils=None, pitch=None, free_length=None)` | Provide exactly two of the three; computes coils, active coils, Wahl factor, spring constant, solid length, and wire length. |
 | `.add_load_position(length)` | Record the load/stress/outer-diameter at a given compressed length, for the load-position table and fatigue analysis. |
@@ -209,7 +213,7 @@ for length_mm in [30, 40, 50, 60, 70, 80, 90, 100]:
     spring.add_load_position(length=length_mm)
 
 data = spring.get_spring_data()
-print(data["spring_constant"])          # ~47.84 N / mm
+print(data["spring_constant"])          # ~3.60 N / mm
 print(data["wahl_factor_category"])     # 'green' -> C=11 is in a normal manufacturable range
 
 # Graphs (base64 PNGs, ready to embed in HTML or a PDF)
@@ -231,16 +235,16 @@ setters require explicit `Quantity` values rather than plain numbers.
 | Method | Description |
 |---|---|
 | `ExtensionSpring(material, wire_diameter, **data)` | Create the spring. |
-| `.set_diameter(outer_diameter=None, inner_diameter=None, mean_diameter=None)` | Set exactly one diameter. **Must be a `Quantity`** (e.g. `15 * ureg.mm`), not a plain number. |
-| `.calculate_spring_properties(nr_coils=None, pitch=None, free_length=None)` | Provide exactly two of the three; computes active coils, spring constant, and wire length. |
+| `.set_diameter(mean_diameter=None, outer_diameter=None, inner_diameter=None)` | Set exactly one diameter. **Must be a `Quantity`** (e.g. `15 * ureg.mm`), not a plain number. |
+| `.calculate_spring_properties(nr_coils=None, pitch=None, free_length=None)` | Pass `nr_coils` (required); `pitch` is optional and defaults to the wire diameter (close-wound). `free_length` is **accepted but ignored** — it is set to `nr_coils × pitch`. Computes active coils, spring constant, and wire length. |
 | `.add_load_position(length)` | Record the load/stress/outer-diameter at a given extended length (must be ≥ free length). |
 | `.calculate_positions_table(step: list)` | Convenience: call `add_load_position` for each length in `step`. |
 | `.empty_tables()` | Clear the recorded load positions. |
 | `.get_spring_data()` | `dict` with all computed spring properties. |
 | `.get_data_positions()` / `.get_data_travels()` | List of recorded `LinearLoadPosition`. |
 | `.get_forces_vs_position_graph(show=False)` / `.get_forces_vs_travel_graph(show=False)` | Load curves; return base64 PNGs. |
-| `.get_diameter_graph()` / `.get_diameter_vs_position_graph()` | Diameter curves (no `show` parameter on this class); return base64 PNGs. |
-| `.create_goodman_diagram()` | Fatigue analysis from the recorded positions; returns `{"image", "analysis", "stresses"}` or `{"error", "traceback"}` (no `show` parameter). |
+| `.get_diameter_graph(show=False)` / `.get_diameter_vs_position_graph(show=False)` | Diameter curves; return base64 PNGs. |
+| `.create_goodman_diagram(show=False)` | Fatigue analysis from the recorded positions; returns `{"image", "analysis", "stresses"}` or `{"error", "traceback"}`. |
 | `.get_stress_max()` / `.get_stress_min()` / `.get_load_max()` / `.get_load_min()` | Extremes across recorded positions. |
 | `.set_number_cycles(number_cycles)` | Design life in cycles for the fatigue analysis. |
 | `.set_initial_stress(initial_stress)` | Set the spring's initial tension (pre-load) stress. |
@@ -252,9 +256,9 @@ from springcalc.pymodels.units import ureg
 material = Material(material_name="SH")
 spring = ExtensionSpring(material=material, wire_diameter=1.5)
 spring.set_diameter(outer_diameter=15 * ureg.mm)   # note: needs a Quantity, unlike CompressionSpring
-spring.calculate_spring_properties(nr_coils=10, free_length=60)
+spring.calculate_spring_properties(nr_coils=10)    # pitch defaults to the wire diameter -> free_length = 10 * 1.5 = 15 mm
 
-spring.calculate_positions_table([65, 70, 75, 80])  # extend beyond the free length
+spring.calculate_positions_table([20, 25, 30, 35])  # extend beyond the 15 mm free length
 
 data = spring.get_spring_data()
 print(data["spring_constant"])   # ~2.33 N / mm
@@ -273,7 +277,7 @@ position/travel and torque instead of linear load. It extends
 | Method | Description |
 |---|---|
 | `TorsionSpring(material, wire_diameter, **data)` | Create the spring. |
-| `.set_geometry(mean_diameter, nr_coils, pitch, free_angle, fixed_leg_radius, mobile_leg_radius)` | One-call setup: sets geometry and computes every derived property. Returns `.get_spring_properties()`. |
+| `.set_geometry(mean_diameter=None, outer_diameter=None, inner_diameter=None, nr_coils=None, pitch=None, free_angle=None, fixed_leg_radius=None, mobile_leg_radius=None)` | One-call setup: pass exactly one of the three diameters plus `nr_coils`/`pitch`/`free_angle`/`fixed_leg_radius`/`mobile_leg_radius`. Sets geometry and computes every derived property. Returns `.get_spring_properties()`. |
 | `.calculate_spring_properties()` | Re-run the derived-property calculations after changing an input. |
 | `.add_position(angle_travel=None, torque=None)` | Record a working position from either an angular travel or a torque (exactly one). |
 | `.clean_positions()` | Clear the recorded positions. |
@@ -316,20 +320,20 @@ also be used directly.
 
 | Member | Description |
 |---|---|
-| `GoodmanData(material, diameter, load_type="axial", cycles=1e6)` | Pydantic input model. `load_type` is `"axial"`, `"torsion"`, or `"flexion"`. |
+| `GoodmanData(material, wire_diameter, load_type="axial", number_cycles=1e6)` | Pydantic input model. `load_type` is `"axial"`, `"torsion"`, or `"flexion"`. |
 | `GoodmanAnalyzer(data, shot_peening=False)` | Computes the Marin correction factors, the corrected endurance limit `Sse` and fatigue strength `Ssf`. |
 | `.calculate_safety_factor(sigma_max, sigma_min)` | Modified-Goodman safety factor for an operating stress cycle. |
 | `.get_analysis_summary(sigma_max, sigma_min)` | `dict` with the correction factors, strengths, operating point, and safety factor. |
 | `.plot_diagram(sigma_max, sigma_min, show_plot=True)` | Returns a matplotlib `Figure` with the Goodman envelope and the operating point plotted. |
 | `.get_diagram_image(sigma_max, sigma_min)` | Same diagram, returned as a base64 PNG string. |
-| `Goodman(material, diameter, load_type="axial", number_cycles=1e6, shot_peening=False)` | Backwards-compatible wrapper around `GoodmanAnalyzer` with the same methods (`plot_goodman_graph`, `get_goodman_graph`, etc.). |
+| `Goodman(material, wire_diameter, load_type="axial", number_cycles=1e6, shot_peening=False)` | Backwards-compatible wrapper around `GoodmanAnalyzer` with the same methods (`plot_goodman_graph`, `get_goodman_graph`, etc.). |
 | `generate_goodman_diagram(spring, initial_length, final_length, shot_peening=False, number_cycles=1e6)` | Module function in `springcalc.plots`: derives max/min load and stress for a spring compressed between two lengths, and returns the same `{"image", "analysis", "stresses"}` dict. **`initial_length`/`final_length` must be `Quantity` values** (they're subtracted directly from `spring.free_length`). |
 
 ```python
 from springcalc import Material, GoodmanData, GoodmanAnalyzer
 
 material = Material(material_name="DH")
-data = GoodmanData(material=material, diameter=1.0, load_type="torsion", cycles=1e5)
+data = GoodmanData(material=material, wire_diameter=1.0, load_type="torsion", number_cycles=1e5)
 analyzer = GoodmanAnalyzer(data)
 
 sigma_max, sigma_min = 400, 100   # MPa
@@ -404,15 +408,14 @@ correction (no `.calculate_active_coils()`/`.nr_active_coils`): `.nr_coils`
 is used directly wherever `CompressionSpring` would use its (always smaller)
 active-coil count, so even for a constant-diameter, constant-pitch spring
 its results (e.g. `.calculate_spring_constant()`) don't numerically match
-`CompressionSpring`'s for the same `nr_coils` — `type_of_end`/
-`type_conforming` are accepted (and stored) but don't otherwise affect the
-calculation here.
+`CompressionSpring`'s for the same `nr_coils` — `type_of_end` is accepted
+(and stored) but doesn't otherwise affect the calculation here.
 
 | Method | Description |
 |---|---|
 | `CompressionSpringGeneral(material, wire_diameter, **data)` | Create the spring. Set `.mean_diameter_init`, `.pitch_constant`, and `.free_length` for a constant-geometry spring, or... |
-| `.establish_geometrical_function(func_D, func_p)` | ...inject custom functions `h -> mean_diameter` and `h -> pitch` (both `Quantity -> Quantity`) for a true variable-geometry spring. |
-| `.set_geometry(func_D, func_p, free_length=None, type_of_end=None, type_conforming=None)` | One-call setup: calls `.establish_geometrical_function(func_D, func_p)`, sets `.free_length`, and optionally `type_of_end` (one of `constants.COMPRESSION_SPRING_END_TYPES`, e.g. `"open_ground"`) and `type_conforming` (one of `constants.FORMING_TYPES`, e.g. `"cold_formed"`) — both default to the spring's current value when omitted. |
+| `.establish_geometrical_function(f_mean_diameter, f_pitch)` | ...inject custom functions `h -> mean_diameter` and `h -> pitch` (both `Quantity -> Quantity`) for a true variable-geometry spring. |
+| `.set_geometry(f_mean_diameter, f_pitch, free_length, type_of_end=None)` | One-call setup: calls `.establish_geometrical_function(f_mean_diameter, f_pitch)`, sets `.free_length` (**required**, must be a `Quantity`), and optionally `type_of_end` (one of `constants.COMPRESSION_SPRING_END_TYPES`, e.g. `"open_ground"`) — defaults to the spring's current value when omitted. |
 | `.calculate_theta_max()` | Total helix rotation angle (rad) needed to reach `free_length`; also updates `.nr_coils`. |
 | `.calculate_spring_constant(num_points=500)` | Equivalent stiffness, integrating the local flexibility along the entire helix (`.nr_coils`). Unlike `CompressionSpring`, this class has no active-coil correction — end coils aren't excluded, so results are only comparable to `CompressionSpring`'s for end types where that correction is zero. |
 | `.calculate_wire_length(num_points=500)` | Total wire length, integrating the 3D arc length along the helix. |
@@ -428,11 +431,10 @@ from springcalc.lineal.generic_compression import CompressionSpringGeneral
 material = Material(material_name="SH")
 spring = CompressionSpringGeneral(material=material, wire_diameter=2.0)
 spring.set_geometry(
-    func_D=lambda h: 20 * ureg.mm,
-    func_p=lambda h: 6 * ureg.mm,
+    f_mean_diameter=lambda h: 20 * ureg.mm,
+    f_pitch=lambda h: 6 * ureg.mm,
     free_length=60 * ureg.mm,
     type_of_end="open_ground",     # optional; this is the default
-    type_conforming="cold_formed", # optional; this is the default
 )
 
 spring.calculate_theta_max()
@@ -464,7 +466,7 @@ from springcalc.lineal.animation import CompressionAnimator
 
 material = Material(material_name="SH")
 spring = CompressionSpringGeneral(material=material, wire_diameter=2.0)
-spring.set_geometry(func_D=lambda h: 20 * ureg.mm, func_p=lambda h: 6 * ureg.mm, free_length=60 * ureg.mm)
+spring.set_geometry(f_mean_diameter=lambda h: 20 * ureg.mm, f_pitch=lambda h: 6 * ureg.mm, free_length=60 * ureg.mm)
 
 animator = CompressionAnimator(spring)
 animator.create_gif(max_deflection=25 * ureg.mm, output_path="compression.gif")
@@ -494,8 +496,8 @@ the safety-factor target is found by 1-D root finding.
 
 | Member | Description |
 |---|---|
-| `Requirements(material, security_factor, length1=None, length2=None, force1=None, force2=None, csv_path=None)` | Design brief. Give either `length1`/`length2`/`force1`/`force2` (two exact length/force points) or `csv_path` (a CSV with `length`,`force` columns, mm/N, fit by least squares) — not both. Also used by the conical designers below. |
-| `CompressionSpringInverseDesigner(requirements, type_of_end=..., type_conforming=..., spring_index_bounds=(4.5, 12.0), wire_diameter_bounds=(0.0, inf), min_active_coils=2.0, number_cycles=1_000_000, shot_peening=False)` | Construct the designer. |
+| `Requirements(material, safety_factor, length1=None, length2=None, force1=None, force2=None, csv_path=None)` | Design brief. Give either `length1`/`length2`/`force1`/`force2` (two exact length/force points) or `csv_path` (a CSV with `length`,`force` columns, mm/N, fit by least squares) — not both. Also used by the conical designers below. |
+| `CompressionSpringInverseDesigner(requirements, type_of_end=..., spring_index_bounds=(4.5, 12.0), wire_diameter_bounds=(0.0, inf), min_active_coils=2.0, number_cycles=1_000_000, shot_peening=False)` | Construct the designer. |
 | `.design()` | Runs the search and returns an `InverseCompressionDesign`. |
 | `InverseCompressionDesign.spring` | The winning, fully built `CompressionSpring` (load positions already added at the two extreme lengths). |
 | `.wire_diameter` / `.mean_diameter` / `.free_length` / `.nr_coils` / `.spring_index` / `.spring_constant` | Resulting geometry, as `Quantity`/`float`. |
@@ -508,7 +510,7 @@ from springcalc.pymodels.material import Material
 
 material = Material(material_name="SL")
 requirements = Requirements(
-    material=material, security_factor=1.5,
+    material=material, safety_factor=1.5,
     length1=60, force1=200,   # more compressed, higher-force point
     length2=90, force2=50,    # less compressed, lower-force point
 )
@@ -532,13 +534,13 @@ shape is searched on a grid and locally polished (Nelder-Mead).
 
 | Member | Description |
 |---|---|
-| `ConicalCompressionSpringInverseDesigner(requirements, type_of_end=..., type_conforming=..., spring_index_bounds=(4.5, 12.0), taper_ratio_bounds=(0.3, 1.0), pitch_ratio_bounds=(0.3, 3.0), wire_diameter_bounds=(0.0, inf), min_coils=2.0, shape_grid_resolution=9, number_cycles=1_000_000, shot_peening=False)` | Construct the designer with the same `Requirements` used above. |
+| `ConicalCompressionSpringInverseDesigner(requirements, type_of_end=..., spring_index_bounds=(4.5, 12.0), taper_ratio_bounds=(0.3, 1.0), pitch_ratio_bounds=(0.3, 3.0), wire_diameter_bounds=(0.0, inf), min_coils=2.0, shape_grid_resolution=9, number_cycles=1_000_000, shot_peening=False)` | Construct the designer with the same `Requirements` used above. |
 | `.design()` | Runs the search and returns a `ConicalInverseCompressionDesign`. |
 | `ConicalInverseCompressionDesign.spring` | The winning, fully built `CompressionSpringGeneral`. |
 | `.diameter_start` / `.diameter_end` / `.pitch_start` / `.pitch_end` / `.free_length` / `.nr_coils` / `.solid_length` / `.spring_constant` | Resulting geometry, as `Quantity`/`float`. |
 | `.safety_factor` / `.safety_factor_target` / `.safety_factor_error` | Achieved vs. target safety factor. |
 | `.candidates` | `list[ShapeCandidate]`, best taper shape per standard wire diameter tried. |
-| `linear_profile(start_mm, end_mm, free_length_mm)` | Module function: builds a `func_D`/`func_p`-compatible closure for a linearly-varying quantity — handy for feeding the winning geometry into `CompressionSpringGeneral.set_geometry()` directly. |
+| `linear_profile(start_mm, end_mm, free_length_mm)` | Module function: builds a `f_mean_diameter`/`f_pitch`-compatible closure for a linearly-varying quantity — handy for feeding the winning geometry into `CompressionSpringGeneral.set_geometry()` directly. |
 
 ```python
 from springcalc.inverse_calc.conical_comp_inv import ConicalCompressionSpringInverseDesigner
@@ -546,7 +548,7 @@ from springcalc.inverse_calc.lineal_comp_inv import Requirements
 from springcalc.pymodels.material import Material
 
 material = Material(material_name="SL")
-requirements = Requirements(material=material, security_factor=1.2,
+requirements = Requirements(material=material, safety_factor=1.2,
                             length1=60, force1=200, length2=90, force2=50)
 result = ConicalCompressionSpringInverseDesigner(requirements).design()
 
@@ -572,9 +574,9 @@ re-fit before the final design is rebuilt with the real, general
 
 | Member | Description |
 |---|---|
-| `CompressionCurveRequirements(material, security_factor, csv_path)` | Design brief: `csv_path` is a CSV with `displacement`,`load` columns (mm, N) — `displacement` is travel from the free length, not an absolute position. |
+| `CompressionCurveRequirements(material, safety_factor, csv_path)` | Design brief: `csv_path` is a CSV with `displacement`,`load` columns (mm, N) — `displacement` is travel from the free length, not an absolute position. |
 | `load_target_curve(csv_path)` | Module function: reads and sorts the target curve; returns `(displacement, load)` numpy arrays. |
-| `ConicalCurveCompressionSpringInverseDesigner(requirements, type_of_end=..., type_conforming=..., spring_index_bounds=(4.5, 12.0), wire_diameter_bounds=(0.3, 10.0), diameter_bounds=(3.0, 150.0), pitch_bounds=(0.3, 40.0), free_length_margin=(1.05, 3.0), min_coils=2.0, safety_factor_weight=1.0, penalty_weight=0.05, search_num_points=60, search_steps=60, final_num_points=500, final_steps=500, maxiter=60, popsize=15, seed=None, number_cycles=1_000_000, shot_peening=False)` | Construct the designer. `seed` makes the regression reproducible. |
+| `ConicalCurveCompressionSpringInverseDesigner(requirements, type_of_end=..., spring_index_bounds=(4.5, 12.0), wire_diameter_bounds=(0.3, 10.0), diameter_bounds=(3.0, 150.0), pitch_bounds=(0.3, 40.0), free_length_margin=(1.05, 3.0), min_coils=2.0, safety_factor_weight=1.0, penalty_weight=0.05, search_num_points=60, search_steps=60, final_num_points=500, final_steps=500, maxiter=60, popsize=15, seed=None, number_cycles=1_000_000, shot_peening=False)` | Construct the designer. `seed` makes the regression reproducible. |
 | `.design()` | Runs the regression and returns a `ConicalCurveInverseDesign`. |
 | `ConicalCurveInverseDesign.spring` | The winning, fully built `CompressionSpringGeneral`. |
 | `.diameter_start` / `.diameter_end` / `.pitch_start` / `.pitch_end` / `.free_length` / `.nr_coils` / `.solid_length` | Resulting geometry, as `Quantity`/`float`. |
@@ -590,7 +592,7 @@ from springcalc.pymodels.material import Material
 
 material = Material(material_name="SL")
 requirements = CompressionCurveRequirements(
-    material=material, security_factor=1.3, csv_path="target_curve.csv",  # displacement,load columns (mm, N)
+    material=material, safety_factor=1.3, csv_path="target_curve.csv",  # displacement,load columns (mm, N)
 )
 result = ConicalCurveCompressionSpringInverseDesigner(requirements, seed=0).design()
 
@@ -615,7 +617,7 @@ whenever a simple taper already fits the target curve.
 
 | Member | Description |
 |---|---|
-| `GeneralCompressionSpringInverseDesigner(requirements, type_of_end=..., type_conforming=..., num_control_points=4, spring_index_bounds=(4.5, 12.0), wire_diameter_bounds=(0.3, 10.0), diameter_bounds=(3.0, 150.0), pitch_bounds=(0.3, 40.0), free_length_margin=(1.05, 3.0), min_coils=2.0, safety_factor_weight=1.0, penalty_weight=0.05, search_num_points=20, search_steps=15, final_num_points=500, final_steps=500, maxiter=15, popsize=6, polish_maxiter=60, seed=None, workers=1, number_cycles=1_000_000, shot_peening=False)` | Construct the designer with the same `CompressionCurveRequirements` used by the conical curve designer. `workers` parallelizes the global search across processes (default 1). |
+| `GeneralCompressionSpringInverseDesigner(requirements, type_of_end=..., num_control_points=4, spring_index_bounds=(4.5, 12.0), wire_diameter_bounds=(0.3, 10.0), diameter_bounds=(3.0, 150.0), pitch_bounds=(0.3, 40.0), free_length_margin=(1.05, 3.0), min_coils=2.0, safety_factor_weight=1.0, penalty_weight=0.05, search_num_points=20, search_steps=15, final_num_points=500, final_steps=500, maxiter=15, popsize=6, polish_maxiter=60, seed=None, workers=1, number_cycles=1_000_000, shot_peening=False)` | Construct the designer with the same `CompressionCurveRequirements` used by the conical curve designer. `workers` parallelizes the global search across processes (default 1). |
 | `.design()` | Runs the regression and returns a `GeneralCurveInverseDesign`. |
 | `GeneralCurveInverseDesign.spring` | The winning, fully built `CompressionSpringGeneral`. |
 | `.diameter_control_points` / `.pitch_control_points` / `.control_positions` | The fitted profile's control values (`Quantity` arrays) and the axial positions (`Quantity`, mm) they sit at — there's no single start/end pair for a general shape. |
@@ -624,7 +626,7 @@ whenever a simple taper already fits the target curve.
 | `.safety_factor` / `.safety_factor_target` / `.safety_factor_error` | Achieved vs. target safety factor. |
 | `.curve_rmse` / `.curve_rmse_relative` | Fit quality, same meaning as the conical curve designer's fields. |
 | `.target_displacement` / `.target_load` / `.simulated_displacement` / `.simulated_load` | Both curves as numpy arrays. |
-| `spline_profile(control_h_mm, control_values_mm, free_length_mm)` | Module function: builds a `func_D`/`func_p`-compatible closure for a PCHIP spline through control points — handy for feeding the winning geometry into `CompressionSpringGeneral.set_geometry()` directly. |
+| `spline_profile(control_h_mm, control_values_mm, free_length_mm)` | Module function: builds a `f_mean_diameter`/`f_pitch`-compatible closure for a PCHIP spline through control points — handy for feeding the winning geometry into `CompressionSpringGeneral.set_geometry()` directly. |
 
 ```python
 from springcalc.inverse_calc.conical_curve_comp_inv import CompressionCurveRequirements
@@ -633,7 +635,7 @@ from springcalc.pymodels.material import Material
 
 material = Material(material_name="SL")
 requirements = CompressionCurveRequirements(
-    material=material, security_factor=1.3, csv_path="target_curve.csv",  # displacement,load columns (mm, N)
+    material=material, safety_factor=1.3, csv_path="target_curve.csv",  # displacement,load columns (mm, N)
 )
 result = GeneralCompressionSpringInverseDesigner(requirements, seed=0).design()
 

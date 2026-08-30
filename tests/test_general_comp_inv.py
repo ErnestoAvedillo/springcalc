@@ -32,8 +32,8 @@ def target_curve_csv(tmp_path, material):
     # root-solve-based simulation, unlike the closed-form conical search).
     wire_d, d_start, d_end, p_start, p_end, free_length = 2.0, 18.0, 18.0, 5.0, 5.0, 20.0
     spring = CompressionSpringGeneral(material=material, wire_diameter=wire_d * ureg.mm)
-    spring.set_geometry(func_D=linear_profile(d_start, d_end, free_length),
-                        func_p=linear_profile(p_start, p_end, free_length),
+    spring.set_geometry(f_mean_diameter=linear_profile(d_start, d_end, free_length),
+                        f_pitch=linear_profile(p_start, p_end, free_length),
                         free_length=free_length * ureg.mm)
     deflection, force, _ = spring.simulate_progressive_compression(
         max_deflection=6 * ureg.mm, steps=30, num_points=30)
@@ -84,21 +84,21 @@ def test_spline_profile_passes_through_control_points_and_clamps():
 def test_designer_rejects_curve_with_fewer_than_two_points(tmp_path, material):
     csv_path = tmp_path / "one_point.csv"
     pd.DataFrame({"displacement": [0], "load": [0]}).to_csv(csv_path, index=False)
-    requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=str(csv_path))
+    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=str(csv_path))
 
     with pytest.raises(ValueError):
         GeneralCompressionSpringInverseDesigner(requirements)
 
 
 def test_designer_rejects_fewer_than_two_control_points(material, target_curve_csv):
-    requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=target_curve_csv)
+    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=target_curve_csv)
 
     with pytest.raises(ValueError, match="num_control_points"):
         GeneralCompressionSpringInverseDesigner(requirements, num_control_points=1)
 
 
 def test_geometry_penalty_penalizes_out_of_bounds_geometry(material, target_curve_csv, designer_kwargs):
-    requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=target_curve_csv)
+    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=target_curve_csv)
     designer = GeneralCompressionSpringInverseDesigner(requirements, **designer_kwargs)
 
     reasonable = designer._geometry_penalty(
@@ -114,7 +114,7 @@ def test_geometry_penalty_penalizes_out_of_bounds_geometry(material, target_curv
 
 
 def test_evaluate_skips_expensive_simulation_for_grossly_invalid_geometry(material, target_curve_csv, designer_kwargs):
-    requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=target_curve_csv)
+    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=target_curve_csv)
     designer = GeneralCompressionSpringInverseDesigner(requirements, **designer_kwargs)
 
     # Pitch smaller than the wire diameter at every control point is a
@@ -143,7 +143,7 @@ def test_evaluate_returns_a_plain_float_for_a_valid_geometry(material, target_cu
     # element-by-element pint arithmetic -- observed to inflate a search
     # from seconds to many minutes. _evaluate must always return a plain
     # float.
-    requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=target_curve_csv)
+    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=target_curve_csv)
     designer = GeneralCompressionSpringInverseDesigner(requirements, **designer_kwargs)
 
     x = [2.0, 20.0, 18.0, 18.0, 5.0, 5.0]
@@ -162,7 +162,7 @@ def test_full_curve_fit_design_produces_valid_general_spring(material, target_cu
     # since every evaluation here -- unlike
     # ConicalCurveCompressionSpringInverseDesigner's closed-form search --
     # pays for a real simulation).
-    requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=target_curve_csv)
+    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=target_curve_csv)
     designer = GeneralCompressionSpringInverseDesigner(requirements, **designer_kwargs)
 
     result = designer.design()

@@ -88,9 +88,9 @@ class ExtensionSpring(LinealSpring):
 
     def set_diameter(
             self,
+            mean_diameter: float = None,
             outer_diameter: float = None,
             inner_diameter: float = None,
-            mean_diameter: float = None,
             ):
         if sum(1 for var in [outer_diameter,
                              inner_diameter,
@@ -113,13 +113,20 @@ class ExtensionSpring(LinealSpring):
                      inner_diameter: float = None,
                      nr_coils: float = None,
                      pitch: float = None,
-                     free_length: float = None):
+                     free_length: float = None,
+                     type_of_end: Optional[str] = None):
         """Set the spring's full geometry in one call.
 
         Provide exactly one of mean_diameter, outer_diameter, inner_diameter,
-        and exactly two of nr_coils, pitch, free_length. Computes and stores
-        every derived spring property, same as calling set_diameter() followed
-        by calculate_spring_properties().
+        and all three of nr_coils, pitch, free_length (an extension spring's
+        length between hooks is set independently of its body, so none of the
+        three is derivable from the other two). Computes and stores every
+        derived spring property, same as calling set_diameter() followed by
+        calculate_spring_properties().
+
+        Note: unlike CompressionSpring.set_geometry there is no
+        ``type_conforming`` parameter -- the extension-spring model does not
+        represent cold/hot forming.
         """
         diameters_provided = sum(1 for var in [mean_diameter, outer_diameter, inner_diameter] if var is not None)
         if diameters_provided != 1:
@@ -128,6 +135,9 @@ class ExtensionSpring(LinealSpring):
         length_params_provided = sum(1 for var in [nr_coils, pitch, free_length] if var is not None)
         if length_params_provided != 3:
             raise ValueError("You must provide all three of the following variables: nr_coils, pitch, free_length")
+
+        if type_of_end is not None:
+            self.type_of_end = type_of_end
 
         self.set_diameter(mean_diameter=mean_diameter,
                           outer_diameter=outer_diameter,
@@ -507,9 +517,9 @@ class ExtensionSpring(LinealSpring):
 
             goodman_data = GoodmanData(
                 material=self.material,
-                diameter=self.wire_diameter,
+                wire_diameter=self.wire_diameter,
                 load_type="torsion",
-                cycles=int(self.number_cycles),
+                number_cycles=int(self.number_cycles),
             )
 
             analyzer = GoodmanAnalyzer(goodman_data, shot_peening=self.shot_peening)
@@ -545,7 +555,7 @@ class ExtensionSpring(LinealSpring):
     def get_goodman_graph(self):
         goodman_diagram = Goodman(
             material=self.material,
-            diameter=self.wire_diameter,
+            wire_diameter=self.wire_diameter,
             load_type="torsion",
             number_cycles=self.number_cycles,
             shot_peening=self.shot_peening,
@@ -570,7 +580,7 @@ class ExtensionSpring(LinealSpring):
     def plot_diagram(self):
         goodman_diagram = Goodman(
             material=self.material,
-            diameter=self.wire_diameter,
+            wire_diameter=self.wire_diameter,
             load_type="torsion",
             number_cycles=self.number_cycles,
             shot_peening=self.shot_peening,
@@ -582,7 +592,7 @@ class ExtensionSpring(LinealSpring):
     def get_goodman_analysis_summary(self):
         goodman_diagram = Goodman(
             material=self.material,
-            diameter=self.wire_diameter,
+            wire_diameter=self.wire_diameter,
             load_type="torsion",
             number_cycles=self.number_cycles,
             shot_peening=self.shot_peening,

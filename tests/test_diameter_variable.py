@@ -60,13 +60,13 @@ def test_cuadratic_diameter():
     material = Material(material_name="SH")
     spring = CompressionSpringGeneral(material=material, wire_diameter=2.0)
 
-    spring.set_geometry(func_D=lambda x: cuadratic_diameter(x,
+    spring.set_geometry(f_mean_diameter=lambda x: cuadratic_diameter(x,
                                                             min_diameter=10 * ureg.mm,
                                                             max_diameter=20 * ureg.mm,
                                                             free_length=130 * ureg.mm,
                                                             alfa=0.7,
                                                             beta=0.3),
-                        func_p=lambda x: 3 * ureg.mm,
+                        f_pitch=lambda x: 3 * ureg.mm,
                         free_length=130 * ureg.mm)
     spring.calculate_spring_properties()
     spring_data = spring.get_spring_data()
@@ -108,11 +108,11 @@ def test_linear_diameter():
 
     material = Material(material_name="SH")
     spring = CompressionSpringGeneral(material=material, wire_diameter=2.0)
-    spring.set_geometry(func_D=lambda x: linear_diameter(x,
+    spring.set_geometry(f_mean_diameter=lambda x: linear_diameter(x,
                                                          min_diameter=10 * ureg.mm,
                                                          max_diameter=30 * ureg.mm,
                                                          free_length=130 * ureg.mm),
-                        func_p=lambda x: 3 * ureg.mm,
+                        f_pitch=lambda x: 3 * ureg.mm,
                         free_length=130 * ureg.mm)
     spring.calculate_spring_properties()
     spring_data = spring.get_spring_data()

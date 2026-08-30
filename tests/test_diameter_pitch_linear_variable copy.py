@@ -54,11 +54,11 @@ def test_linear_diameter():
 
     material = Material(material_name="SH")
     spring = CompressionSpringGeneral(material=material, wire_diameter=2.0)
-    spring.set_geometry(func_D=lambda x: linear_diameter(x,
+    spring.set_geometry(f_mean_diameter=lambda x: linear_diameter(x,
                                                          min_diameter=20 * ureg.mm,
                                                          max_diameter=60 * ureg.mm,
                                                          free_length=130 * ureg.mm),
-                        func_p=lambda x: linear_pitch(x,
+                        f_pitch=lambda x: linear_pitch(x,
                                                       min_pitch=2.5 * ureg.mm,
                                                       max_pitch=5.0 * ureg.mm,
                                                       free_length=130 * ureg.mm),

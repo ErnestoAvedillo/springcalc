@@ -84,15 +84,15 @@ def _build_geometry_functions(params: DesignParams) -> tuple[Callable[[Quantity]
     p_spline = PchipInterpolator(ctrl_h, params.p_control_mm)
     free_length_mm = params.free_length_mm
 
-    def func_D(h: Quantity) -> Quantity:
+    def f_mean_diameter(h: Quantity) -> Quantity:
         h_mm = min(max(h.to("mm").magnitude, 0.0), free_length_mm)
         return float(d_spline(h_mm)) * ureg.mm
 
-    def func_p(h: Quantity) -> Quantity:
+    def f_pitch(h: Quantity) -> Quantity:
         h_mm = min(max(h.to("mm").magnitude, 0.0), free_length_mm)
         return float(p_spline(h_mm)) * ureg.mm
 
-    return func_D, func_p
+    return f_mean_diameter, f_pitch
 
 
 def format_profile_formula(params: DesignParams) -> str:
@@ -126,9 +126,9 @@ def format_profile_formula(params: DesignParams) -> str:
 
 
 def build_spring(material: Material, params: DesignParams) -> CompressionSpringGeneral:
-    func_D, func_p = _build_geometry_functions(params)
+    f_mean_diameter, f_pitch = _build_geometry_functions(params)
     spring = CompressionSpringGeneral(material=material, wire_diameter=params.wire_diameter_mm * ureg.mm)
-    spring.set_geometry(func_D=func_D, func_p=func_p, free_length=params.free_length_mm * ureg.mm)
+    spring.set_geometry(f_mean_diameter=f_mean_diameter, f_pitch=f_pitch, free_length=params.free_length_mm * ureg.mm)
     return spring
 
 

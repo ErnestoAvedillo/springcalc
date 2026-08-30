@@ -26,8 +26,8 @@ def target_curve_csv(tmp_path, material):
     # target with genuine coil-contact nonlinearity in it.
     wire_d, d_start, d_end, p_start, p_end, free_length = 2.5, 25.0, 12.0, 6.0, 4.0, 70.0
     spring = CompressionSpringGeneral(material=material, wire_diameter=wire_d * ureg.mm)
-    spring.set_geometry(func_D=linear_profile(d_start, d_end, free_length),
-                        func_p=linear_profile(p_start, p_end, free_length),
+    spring.set_geometry(f_mean_diameter=linear_profile(d_start, d_end, free_length),
+                        f_pitch=linear_profile(p_start, p_end, free_length),
                         free_length=free_length * ureg.mm)
     deflection, force, _ = spring.simulate_progressive_compression(
         max_deflection=34 * ureg.mm, steps=100, num_points=100)
@@ -63,8 +63,8 @@ def test_fast_progressive_compression_matches_real_simulation(material):
     # correctness guarantee the whole search's speed depends on.
     wire_d, d_start, d_end, p_start, p_end, free_length = 2.5, 25.0, 12.0, 6.0, 4.0, 70.0
     spring = CompressionSpringGeneral(material=material, wire_diameter=wire_d * ureg.mm)
-    spring.set_geometry(func_D=linear_profile(d_start, d_end, free_length),
-                        func_p=linear_profile(p_start, p_end, free_length),
+    spring.set_geometry(f_mean_diameter=linear_profile(d_start, d_end, free_length),
+                        f_pitch=linear_profile(p_start, p_end, free_length),
                         free_length=free_length * ureg.mm)
     real_deflection, real_force, _ = spring.simulate_progressive_compression(
         max_deflection=40 * ureg.mm, steps=40, num_points=40)
@@ -91,14 +91,14 @@ def test_fast_progressive_compression_handles_constant_pitch(material):
 def test_designer_rejects_curve_with_fewer_than_two_points(tmp_path, material):
     csv_path = tmp_path / "one_point.csv"
     pd.DataFrame({"displacement": [0], "load": [0]}).to_csv(csv_path, index=False)
-    requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=str(csv_path))
+    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=str(csv_path))
 
     with pytest.raises(ValueError):
         ConicalCurveCompressionSpringInverseDesigner(requirements)
 
 
 def test_evaluate_penalizes_out_of_bounds_geometry(material, target_curve_csv):
-    requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=target_curve_csv)
+    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=target_curve_csv)
     designer = ConicalCurveCompressionSpringInverseDesigner(requirements)
 
     # A spring index far outside spring_index_bounds should score worse than
@@ -116,7 +116,7 @@ def test_full_curve_fit_design_reproduces_target_curve_shape(material, target_cu
     # (fast closed-form simulator) + snap-to-standard-diameter + local
     # refine + final build with the real CompressionSpringGeneral. This is
     # the slow part of this test (the final build alone takes ~20-30s).
-    requirements = CompressionCurveRequirements(material=material, security_factor=1.5, csv_path=target_curve_csv)
+    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=target_curve_csv)
     designer = ConicalCurveCompressionSpringInverseDesigner(requirements, seed=0)
     result = designer.design()
     report = SpringPDFReport(spring=result.spring, title="Conic result")
@@ -128,7 +128,7 @@ def test_full_curve_fit_design_reproduces_target_curve_shape(material, target_cu
     # the module docstring), so it lands in the neighborhood of the target
     # rather than tracking it tightly; a generous tolerance here checks it's
     # influencing the search at all without over-constraining a soft term.
-    assert result.safety_factor == pytest.approx(requirements.security_factor, abs=0.3)
+    assert result.safety_factor == pytest.approx(requirements.safety_factor, abs=0.3)
     # diameter_start/diameter_end share the same bounds, so the fit is free
     # to taper in either direction (D_start > D_end or the reverse -- both
     # are equally valid conical geometries, just relabeling which end is

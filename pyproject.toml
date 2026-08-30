@@ -26,6 +26,7 @@ dependencies = [
     "pandas>=2.2",
     "pint>=0.24",
     "pydantic>=2.13.4",
+    "pypistats>=1.14.0",
     "pytest>=9.1.1",
     "reportlab>=4.0",
     "scipy>=1.14",

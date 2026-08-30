@@ -66,7 +66,7 @@ from ..pymodels.wire_characteristics import get_standard_wire_diameters
 
 
 def linear_profile(start_mm: float, end_mm: float, free_length_mm: float):
-    """A func_D/func_p-compatible closure for a quantity that varies linearly
+    """A f_mean_diameter/f_pitch-compatible closure for a quantity that varies linearly
     from `start_mm` (at h=0) to `end_mm` (at h=free_length_mm). `h` is clamped
     to [0, free_length_mm] first so callers evaluating slightly outside the
     spring's axial extent (e.g. numerical overshoot) get the boundary value
@@ -162,7 +162,6 @@ class ConicalCompressionSpringInverseDesigner:
 
     def __init__(self, requirements: Requirements,
                  type_of_end: str = COMPRESSION_SPRING_END_TYPES[OPEN_GROUND],
-                 type_conforming: str = 'cold_formed',
                  spring_index_bounds: tuple = (4.5, 12.0),
                  taper_ratio_bounds: tuple = (0.3, 1.0),
                  pitch_ratio_bounds: tuple = (0.3, 3.0),
@@ -173,7 +172,6 @@ class ConicalCompressionSpringInverseDesigner:
                  shot_peening: bool = False):
         self.material = requirements.material
         self.type_of_end = type_of_end
-        self.type_conforming = type_conforming
         self.spring_index_bounds = spring_index_bounds
         self.taper_ratio_bounds = taper_ratio_bounds
         self.pitch_ratio_bounds = pitch_ratio_bounds
@@ -182,7 +180,7 @@ class ConicalCompressionSpringInverseDesigner:
         self.shape_grid_resolution = shape_grid_resolution
         self.number_cycles = number_cycles
         self.shot_peening = shot_peening
-        self.safety_factor_target = requirements.security_factor
+        self.safety_factor_target = requirements.safety_factor
         self.shear_modulus_mpa = self.material.shear_modulus.to('MPa').magnitude
 
         rate = solve_rate_target(requirements)
@@ -295,8 +293,8 @@ class ConicalCompressionSpringInverseDesigner:
         evaluation, and a grid avoids a local optimizer getting stuck on a
         bad starting guess in a 2-D, possibly multi-modal objective), then
         locally polished with Nelder-Mead around the grid winner."""
-        goodman_data = GoodmanData(material=self.material, diameter=wire_diameter_mm,
-                                   load_type='torsion', cycles=int(self.number_cycles))
+        goodman_data = GoodmanData(material=self.material, wire_diameter=wire_diameter_mm,
+                                   load_type='torsion', number_cycles=int(self.number_cycles))
         analyzer = GoodmanAnalyzer(goodman_data, shot_peening=self.shot_peening)
 
         taper_grid = np.linspace(*self.taper_ratio_bounds, self.shape_grid_resolution)
@@ -342,7 +340,7 @@ class ConicalCompressionSpringInverseDesigner:
 
         free_length_mm = self.free_length_target
         # Rebuild the winning geometry through the real, contact-aware
-        # CompressionSpringGeneral (func_D/func_p based) rather than trusting
+        # CompressionSpringGeneral (f_mean_diameter/f_pitch based) rather than trusting
         # the closed-form pre-contact numbers used during the search, so the
         # returned design's reported stress/safety-factor come from the same
         # verified machinery every other spring type in this library uses.
@@ -350,18 +348,17 @@ class ConicalCompressionSpringInverseDesigner:
         spring.number_cycles = self.number_cycles
         spring.shot_peening = self.shot_peening
         spring.set_geometry(
-            func_D=linear_profile(best.diameter_start_mm, best.diameter_end_mm, free_length_mm),
-            func_p=linear_profile(best.pitch_start_mm, best.pitch_end_mm, free_length_mm),
+            f_mean_diameter=linear_profile(best.diameter_start_mm, best.diameter_end_mm, free_length_mm),
+            f_pitch=linear_profile(best.pitch_start_mm, best.pitch_end_mm, free_length_mm),
             free_length=free_length_mm * ureg.mm,
             type_of_end=self.type_of_end,
-            type_conforming=self.type_conforming,
         )
         spring.calculate_spring_properties(num_points=500)
         spring.add_load_position(self.length_lo * ureg.mm)
         spring.add_load_position(self.length_hi * ureg.mm)
 
-        goodman_data = GoodmanData(material=self.material, diameter=best.wire_diameter_mm,
-                                   load_type='torsion', cycles=int(self.number_cycles))
+        goodman_data = GoodmanData(material=self.material, wire_diameter=best.wire_diameter_mm,
+                                   load_type='torsion', number_cycles=int(self.number_cycles))
         analyzer = GoodmanAnalyzer(goodman_data, shot_peening=self.shot_peening)
         achieved_safety_factor = analyzer.calculate_safety_factor(spring.get_stress_max(), spring.get_stress_min())
 

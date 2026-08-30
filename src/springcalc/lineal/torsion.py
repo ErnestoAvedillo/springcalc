@@ -202,9 +202,9 @@ class TorsionSpring(WireCharacteristics):
         self.positions = AngularPositionsTable()
 
     def set_geometry(self,
-                     inner_diameter: float = None,
                      mean_diameter: float = None,
                      outer_diameter: float = None,
+                     inner_diameter: float = None,
                      nr_coils: int = None,
                      pitch: float = None,
                      free_angle: float = None,
@@ -243,9 +243,9 @@ class TorsionSpring(WireCharacteristics):
 
     def set_diameter(
             self,
+            mean_diameter: float = None,
             outer_diameter: float = None,
             inner_diameter: float = None,
-            mean_diameter: float = None,
             ):
         if sum(1 for var in [outer_diameter,
                              inner_diameter,
@@ -560,9 +560,9 @@ class TorsionSpring(WireCharacteristics):
 
             goodman_data = GoodmanData(
                 material=self.material,
-                diameter=self.wire_diameter,
+                wire_diameter=self.wire_diameter,
                 load_type='flexion',
-                cycles=int(self.number_cycles)
+                number_cycles=int(self.number_cycles)
             )
 
             analyzer = GoodmanAnalyzer(goodman_data, shot_peening=self.shot_peening)

@@ -23,7 +23,10 @@ def test_set_geometry_returns_spring_data():
     data = spring.set_geometry(outer_diameter=30, pitch=20, free_length=100)
 
     assert data["mean_diameter"].to("mm").magnitude == pytest.approx(27.5)
-    assert data["nr_coils"] == pytest.approx(5.0)
+    # nr_coils = (free_length - end_length) / pitch + inactive_coils, using the
+    # default (unspecified) type_of_end 'closed_ground': end_length = 1.5 *
+    # wire_diameter = 3.75mm, inactive_coils = 2 -> (100 - 3.75)/20 + 2.
+    assert data["nr_coils"] == pytest.approx(6.8125)
 
 
 def test_set_geometry_rejects_more_than_one_diameter():

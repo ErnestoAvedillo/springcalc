@@ -13,10 +13,10 @@ def material():
     return Material(material_name="SL")
 
 
-def make_requirements(material, security_factor=1.5, length1=60, force1=200, length2=90, force2=50):
+def make_requirements(material, safety_factor=1.5, length1=60, force1=200, length2=90, force2=50):
     return Requirements(
         material=material,
-        security_factor=security_factor,
+        safety_factor=safety_factor,
         length1=length1, force1=force1,
         length2=length2, force2=force2,
     )
@@ -36,7 +36,7 @@ def test_design_matches_target_spring_constant_exactly(material):
 
 
 def test_design_hits_safety_factor_target(material):
-    requirements = make_requirements(material, security_factor=1.5)
+    requirements = make_requirements(material, safety_factor=1.5)
     designer = CompressionSpringInverseDesigner(requirements)
     result = designer.design()
 
@@ -74,13 +74,13 @@ def test_design_returns_geometry_that_does_not_bind_before_the_shortest_length(m
 
 
 def test_unreachable_safety_factor_returns_closest_achievable(material):
-    requirements = make_requirements(material, security_factor=50.0)
+    requirements = make_requirements(material, safety_factor=50.0)
     designer = CompressionSpringInverseDesigner(requirements)
     result = designer.design()
 
     # No standard wire diameter can hit SF=50 within the default spring-index
     # bounds for this rate, so the best candidate falls well short of it.
-    assert result.safety_factor < requirements.security_factor
+    assert result.safety_factor < requirements.safety_factor
 
 
 def test_equal_lengths_raise(material):
@@ -114,7 +114,7 @@ def test_calculate_spring(material:Material):
                        length2=pos2,
                        force1=load1,
                        force2=load2,
-                       security_factor=1.5)
+                       safety_factor=1.5)
     designer = CompressionSpringInverseDesigner(requirements=req)
     best_spring = designer.design()
     report = SpringPDFReport(spring=best_spring.spring,

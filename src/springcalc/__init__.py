@@ -35,6 +35,14 @@ from springcalc.report import (
 )
 from springcalc.pymodels.units import ureg
 from springcalc.lineal.plotting import interactive_backend
+from springcalc.persistence import (
+    export_model,
+    import_model,
+    model_to_json,
+    model_from_json,
+    save_model,
+    load_model,
+)
 from importlib.metadata import version as _version
 from springcalc.inverse_calc.lineal_comp_inv import (
     CompressionSpringInverseDesigner
@@ -77,6 +85,12 @@ __all__ = [
     "spring_geometry_to_step",
     "ureg",
     "interactive_backend",
+    "export_model",
+    "import_model",
+    "model_to_json",
+    "model_from_json",
+    "save_model",
+    "load_model",
     "CompressionSpringInverseDesigner",
     "ConicalCompressionSpringInverseDesigner",
     "ConicalCurveCompressionSpringInverseDesigner",
