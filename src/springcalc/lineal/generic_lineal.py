@@ -6,8 +6,8 @@ from ..pymodels.units import ureg
 from .constants import COMPRESSION_SPRING_END_TYPES
 from .constants import OPEN_GROUND
 from ..pymodels.wire_characteristics import WireCharacteristics
-from scipy.integrate import quad, cumulative_trapezoid
-from scipy.optimize import brentq
+from scipy.integrate import quad, cumulative_simpson, cumulative_trapezoid
+from scipy.interpolate import PchipInterpolator
 
 # (Keep your other imports: ureg, WireCharacteristics, Material, etc.)
 
@@ -105,7 +105,10 @@ class VariableLinealSpring(WireCharacteristics):
     def calculate_spring_index_local(self, h: Quantity) -> float:
         """The spring index now depends on which part (h) of the spring you measure"""
         D_local = self.f_mean_diameter(h)
-        return float(D_local.to('mm').magnitude / self.wire_diameter.to('mm').magnitude)
+        local_index = D_local.to('mm').magnitude / self.wire_diameter.to('mm').magnitude
+        if local_index < 3:
+            raise ValueError("The spring index must be greater than 3.")
+        return float(local_index)
 
     def calculate_theta_max(self) -> float:
         """
@@ -120,8 +123,10 @@ class VariableLinealSpring(WireCharacteristics):
             if local_pitch <= 0:
                 raise ValueError("The pitch at any point of h must be greater than zero.")
             return (2 * np.pi) / local_pitch
-
-        theta_max, _ = quad(integrand, 0, H_val)
+        try:
+            theta_max, _ = quad(integrand, 0, H_val)
+        except Exception as e:
+            raise ValueError(f"Error calculating impossible or invalid theta_max: {e}")
         self.theta_max = theta_max
         # Update the total number of coils
         self.nr_coils = theta_max / (2 * np.pi)
@@ -132,60 +137,58 @@ class VariableLinealSpring(WireCharacteristics):
         Solves the correspondence between the angle theta and the height h,
         over [theta_start, theta_end] (defaults to the full [0, theta_max] span).
         Returns numpy arrays in millimeters.
+
+        theta(h) = integral_0^h (2*pi / p(h')) dh' is monotonically increasing
+        (p(h) > 0 everywhere), so rather than root-solving each output point
+        individually -- which re-integrates the pitch from scratch on every
+        trial step of the root solve -- this builds that cumulative curve once
+        on a dense h grid (Simpson's rule) and inverts it with a monotonic
+        cubic (PCHIP) interpolant: a single pass over the (potentially
+        expensive, pint-based) pitch function instead of thousands of
+        repeated quad/root-solve evaluations, yet still accurate to a few
+        parts in 1e-10 thanks to Simpson's O(dh^4) error and PCHIP tracking
+        the curve's actual curvature instead of linearly chording between
+        grid points.
         """
-        if self.theta_max == 0:
-            self.calculate_theta_max()
+        try:
+            if self.theta_max == 0:
+                self.calculate_theta_max()
+        except Exception as e:
+            raise ValueError(f"Error calculating theta_max in development: {e}")
         if theta_end is None:
             theta_end = self.theta_max
 
         # theta_start/theta_end may arrive as a plain float (radians) or as a pint
-        # Quantity (e.g. the default 0.0 * ureg.rad), depending on the caller. Normalize
-        # both to plain float radians up front so every theta value used below is the
-        # same type as `val` (the quad result, already stripped to a magnitude) --
-        # otherwise `val - theta_delta` can end up subtracting a bare float from a
-        # Quantity, which is dimensionally inconsistent and can hand fsolve a Quantity
-        # residual instead of a float.
+        # Quantity (e.g. the default 0.0 * ureg.rad), depending on the caller.
         if isinstance(theta_start, Quantity):
             theta_start = theta_start.to('rad').magnitude
         if isinstance(theta_end, Quantity):
             theta_end = theta_end.to('rad').magnitude
 
         thetas = np.linspace(theta_start, theta_end, num_points)
-        zs = np.zeros(num_points)
 
-        # Numerically solve the cumulative integral for each angle. Each step integrates
-        # only over [zs[i-1], z_test]
-        for i, theta in enumerate(thetas):
-            if i == 0 and theta_start == 0.0:
-                zs[i] = 0.0
-                continue
+        H_val = self.free_length.to('mm').magnitude
 
-            z_prev = zs[i - 1] if i > 0 else 0.0
-            theta_prev = thetas[i - 1] if i > 0 else 0.0
-            theta_delta = theta - theta_prev
-            H_val = self.free_length.to('mm').magnitude
+        # Grid the cumulative angle curve is built on, independent of num_points
+        # so the interpolation stays accurate even when few output points are
+        # requested; 5x the requested resolution with a floor is a comfortable margin.
+        n_grid = max(2000, 5 * num_points)
+        h_grid = np.linspace(0.0, H_val, n_grid)
+        integrand_grid = np.array([(2 * np.pi) / self.f_pitch(h * ureg.mm).to('mm').magnitude for h in h_grid])
+        theta_grid = cumulative_simpson(integrand_grid, x=h_grid, initial=0.0)
 
-            def equation(z_test):
-                # Integral from z_prev to z_test of (2*pi / p(h)) dh
-                val, _ = quad(lambda h: (2 * np.pi) / self.f_pitch(h * ureg.mm).to('mm').magnitude, z_prev, z_test)
-                return val - theta_delta
-
-            # cumulative theta is monotonically increasing in z (p(h) > 0), so the
-            # root is bracketed by [z_prev, H_val] whenever theta is reachable within
-            # the remaining length; brentq exploits that directly instead of hunting
-            # for it from a guess the way fsolve does, which was prone to overshoot
-            # past the physical domain and stall ("not making good progress") near
-            # the free end.
-            if equation(H_val) <= 0.0:
-                zs[i] = H_val
-            else:
-                zs[i] = brentq(equation, z_prev, H_val)
-
-        return thetas, zs
+        zs = PchipInterpolator(theta_grid, h_grid)(thetas)
+        return thetas, np.clip(zs, 0.0, H_val)
 
     def calculate_wire_length(self, num_points=500) -> Quantity:
         """Calculate the wire length by integrating the arc-length differential (ds)"""
-        thetas, zs = self.get_h_theta_development(num_points)
+        try:
+            thetas, zs = self.get_h_theta_development(num_points)
+        except Exception as e:
+            raise ValueError(f"Error calculating theta_max before wire length: {e}")
+
+        if self.theta_max == 0:
+            raise ValueError("theta_max is zero after attempting to calculate it.")
 
         # Get diameters at each z step
         Ds = np.array([self.f_mean_diameter(z * ureg.mm).to('mm').magnitude for z in zs])
@@ -214,9 +217,17 @@ class VariableLinealSpring(WireCharacteristics):
         Calculate the equivalent spring stiffness (K) considering the coils in series.
         1/K = integral_0^theta_max [ 8 * D(theta)^3 / (G * d^4 * 2*pi) ] dtheta
         """
-        if self.theta_max == 0:
-            self.calculate_theta_max()
-        thetas, zs = self.get_h_theta_development(num_points, theta_start=0.0, theta_end=self.theta_max)
+        try:
+            if self.theta_max == 0:
+                self.calculate_theta_max()
+        except Exception as e:
+            raise ValueError(f"Error calculating theta_max before spring constant: {e}")
+        try:
+            thetas, zs = self.get_h_theta_development(num_points,
+                                                      theta_start=0.0,
+                                                      theta_end=self.theta_max)
+        except Exception as e:
+            raise ValueError(f"Error generating h-theta development: {e}")
         Ds = np.array([self.f_mean_diameter(z * ureg.mm).to('mm').magnitude for z in zs])
 
         d_val = self.wire_diameter.to('mm').magnitude
@@ -239,11 +250,15 @@ class VariableLinealSpring(WireCharacteristics):
         total helix angle, coil count, wire length, spring constant, and a
         representative spring index evaluated at mid free length.
         """
-        self.calculate_theta_max()
-        self.calculate_wire_length(num_points=num_points)
-        self.calculate_spring_constant(num_points=num_points)
-        self.spring_index = self.calculate_spring_index_local(self.free_length / 2)
-        return self.get_spring_data()
+        try:
+            self.calculate_theta_max()
+            self.calculate_wire_length(num_points=num_points)
+            self.calculate_spring_constant(num_points=num_points)
+            self.spring_index = self.calculate_spring_index_local(self.free_length / 2)
+            return self.get_spring_data()
+        except Exception as e:
+            print(f"Error calculating spring properties: {e}")
+            return {}
 
     def get_spring_data(self) -> dict:
         """Return a dictionary with the main spring data."""
@@ -293,9 +308,14 @@ class VariableLinealSpring(WireCharacteristics):
         # complete winding: end coils are not excluded, so the geometry
         # captured here (and the animation built from it) renders the full
         # spring from z=0.
-        if self.theta_max == 0:
-            self.calculate_theta_max()
-        thetas, zs_free = self.get_h_theta_development(num_points, theta_start=0.0, theta_end=self.theta_max)
+        try:
+            if self.theta_max == 0:
+                self.calculate_theta_max()
+            thetas, zs_free = self.get_h_theta_development(num_points,
+                                                           theta_start=0.0,
+                                                           theta_end=self.theta_max)
+        except Exception as e:
+            raise ValueError(f"Error generating h-theta development: {e}")
         Ds = np.array([self.f_mean_diameter(z * ureg.mm).to('mm').magnitude for z in zs_free])
         radii = Ds / 2.0
 

@@ -9,7 +9,7 @@
             "type": "debugpy",
             "request": "launch",
             "python": "${workspaceFolder}/.venv/bin/python",
-            "program": "./tests/test_generic_compression.py",
+            "program": "./tests/test_general_compression.py",
             "console": "integratedTerminal",
             "stopOnEntry": true
         },

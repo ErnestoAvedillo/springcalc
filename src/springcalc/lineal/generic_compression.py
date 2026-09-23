@@ -138,7 +138,12 @@ class CompressionSpringGeneral(VariableLinealSpring):
         return outer_diameter
 
     def add_load_position(self, length: Quantity):
-        """Add a load position to the positions table."""
+        """Add a load position to the positions table.
+        Parameters:
+            length: The position along the spring's length where the load is applied.
+        Returns:
+            None
+        """
         try:
             if length < self.solid_length:
                 raise ValueError("The position cannot be smaller than the spring's solid length")
@@ -195,7 +200,12 @@ class CompressionSpringGeneral(VariableLinealSpring):
     def create_goodman_diagram(self, show=False):
         """Generate the Goodman diagram and return a dictionary containing the
         base64 image, analysis, and calculated stresses. If it fails, return a
-        dictionary with the 'error' and 'traceback' keys."""
+        dictionary with the 'error' and 'traceback' keys.
+        Parameters:
+            show: If True, display the Goodman diagram instead of returning it.
+        Returns:
+            dict: A dictionary containing the Goodman diagram image, analysis, and calculated stresses, or an error message if the diagram could not be created.
+        """
         try:
             if not self.positions.positions:
                 raise ValueError("No load positions available for Goodman analysis")
