@@ -98,6 +98,7 @@ class GeneralCurveInverseDesign:
     control_positions: Quantity
     nr_coils: float
     solid_length: Quantity
+    pretension_load: Quantity
     safety_factor: float
     safety_factor_target: float
     curve_rmse: Quantity
@@ -273,6 +274,14 @@ class GeneralCompressionSpringInverseDesigner:
             deflection = deflection_history.to('mm').magnitude
             force = force_history.to('N').magnitude
             predicted_load = np.interp(self.target_displacement, deflection, force)
+            # The simulator always starts at force=0 at displacement=0, but a
+            # target curve measured with a preload won't (see
+            # ConicalCurveCompressionSpringInverseDesigner._evaluate for the
+            # full rationale). Closed-form vertical offset minimizing SSE,
+            # clamped at 0 since a compression spring's preload can't be
+            # negative.
+            pretension_offset = max(float(np.mean(self.target_load - predicted_load)), 0.0)
+            predicted_load = predicted_load + pretension_offset
             rmse = float(np.sqrt(np.mean((predicted_load - self.target_load) ** 2)))
             norm_rmse = rmse / self._target_load_scale
 
@@ -282,8 +291,8 @@ class GeneralCompressionSpringInverseDesigner:
             # CompressionSpringGeneral.calculate_stress_at_position uses
             # (evaluating f_mean_diameter directly at the working length).
             length_lo = free_length_mm - float(self.target_displacement.min())
-            load_hi = float(np.interp(self.target_displacement.max(), deflection, force))
-            load_lo = float(np.interp(self.target_displacement.min(), deflection, force))
+            load_hi = float(np.interp(self.target_displacement.max(), deflection, force)) + pretension_offset
+            load_lo = float(np.interp(self.target_displacement.min(), deflection, force)) + pretension_offset
             diameter_hi = float(spring.f_mean_diameter(length_hi * ureg.mm).to('mm').magnitude)
             diameter_lo = float(spring.f_mean_diameter(length_lo * ureg.mm).to('mm').magnitude)
             stress_hi = _shear_stress(diameter_hi, wire_diameter_mm, load_hi)
@@ -373,12 +382,21 @@ class GeneralCompressionSpringInverseDesigner:
         predicted_load = np.interp(self.target_displacement,
                                    deflection_history.to('mm').magnitude,
                                    force_history.to('N').magnitude)
+        # Same closed-form preload fit as _evaluate, against the final,
+        # real-machinery curve. Setting it on the spring itself makes
+        # add_load_position below (and anything the caller does with
+        # `spring` afterwards) agree with the reported curve_rmse.
+        pretension_offset = max(float(np.mean(self.target_load - predicted_load)), 0.0)
+        spring.initial_force = pretension_offset * ureg.N
+        predicted_load = predicted_load + pretension_offset
         rmse = float(np.sqrt(np.mean((predicted_load - self.target_load) ** 2)))
         norm_rmse = rmse / self._target_load_scale
 
         # Register every point of the target curve with the real spring, so
         # its own stress-at-position machinery (not the search's
-        # approximation) supplies the reported safety factor.
+        # approximation) supplies the reported safety factor. Loads/stresses
+        # now include spring.initial_force, tracking the target CSV's own
+        # (pretensioned) values instead of the bare model curve.
         for displacement_mm in self.target_displacement:
             spring.add_load_position((free_length_mm - float(displacement_mm)) * ureg.mm)
         # float() for the same reason as in _evaluate: calculate_safety_factor
@@ -396,6 +414,7 @@ class GeneralCompressionSpringInverseDesigner:
             control_positions=control_positions_mm * ureg.mm,
             nr_coils=spring.nr_coils,
             solid_length=spring.calculate_solid_length(),
+            pretension_load=spring.initial_force,
             safety_factor=safety_factor,
             safety_factor_target=self.safety_factor_target,
             curve_rmse=rmse * ureg.N,
@@ -403,5 +422,5 @@ class GeneralCompressionSpringInverseDesigner:
             target_displacement=self.target_displacement,
             target_load=self.target_load,
             simulated_displacement=deflection_history.to('mm').magnitude,
-            simulated_load=force_history.to('N').magnitude,
+            simulated_load=force_history.to('N').magnitude + pretension_offset,
         )

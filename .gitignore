@@ -17,3 +17,6 @@ wheels/
 *.png
 *.gif
 launch.json
+# IDE/editor specific files
+.vscode/
+*.json

@@ -131,6 +131,7 @@ def _export_inputs_compression_general(spring: CompressionSpringGeneral, profile
         "shot_peening": spring.shot_peening,
         "coating": spring.coating,
         "number_cycles": spring.number_cycles,
+        "initial_force": _qstr(spring.initial_force),
     }
 
 
@@ -152,6 +153,7 @@ def _build_compression_general(material: Material, wire_diameter, inputs: dict) 
     )
     if inputs.get("type_conforming") is not None:
         spring.type_conforming = inputs["type_conforming"]
+    spring.initial_force = _q(inputs.get("initial_force", 0.0))
     spring.calculate_spring_properties()
     return spring
 
@@ -262,8 +264,18 @@ def export_model(spring, include_results: bool = True, profile_points: int = 50)
     positions table for reading without importing this library.
 
     `spring` must be a `CompressionSpring`, `CompressionSpringGeneral`,
-    `ExtensionSpring`, or `TorsionSpring` instance.
+    `ExtensionSpring`, or `TorsionSpring` instance -- or an inverse-design
+    result (e.g. `ConicalCurveInverseDesign`) that carries one as `.spring`,
+    the same duck typing `report.geometry_export.spring_geometry_to_dict`
+    uses. Passing a curve-fit design result additionally captures the
+    original target curve it was fit to (`target_displacement`/
+    `target_load`, i.e. what the requester actually asked for) under
+    `requested_curve`, descriptive only like `results` -- `import_model`
+    never reads either section back, since the requested curve isn't
+    something the rebuilt spring itself needs to reconstruct.
     """
+    design = spring
+    spring = getattr(design, "spring", design)
     spring_type = type(spring).__name__
     if spring_type not in _SPRING_TYPES:
         raise TypeError(
@@ -281,6 +293,13 @@ def export_model(spring, include_results: bool = True, profile_points: int = 50)
         },
         "positions": _EXPORT_POSITIONS[spring_type](spring),
     }
+    target_displacement = getattr(design, "target_displacement", None)
+    target_load = getattr(design, "target_load", None)
+    if target_displacement is not None and target_load is not None:
+        data["requested_curve"] = {
+            "displacement_mm": [float(v) for v in target_displacement],
+            "load_n": [float(v) for v in target_load],
+        }
     if include_results:
         results = spring_geometry_to_dict(spring)
         results["positions"] = _position_results(spring)
@@ -293,8 +312,9 @@ def import_model(data: dict):
     (or an equivalent hand-written one). Reconstructs the spring by
     replaying `inputs` through the same public API used to build it in the
     first place (`set_geometry`, then `add_load_position`/`add_position`
-    for each entry in `positions`). The `results` section, if present, is
-    never read back -- it's for humans/other tools, not reconstruction.
+    for each entry in `positions`). The `results` and `requested_curve`
+    sections, if present, are never read back -- they're for humans/other
+    tools, not reconstruction.
     """
     spring_type = data.get("spring_type")
     if spring_type not in _SPRING_TYPES:
@@ -314,7 +334,8 @@ def import_model(data: dict):
 
 
 def model_to_json(spring, include_results: bool = True, profile_points: int = 50, indent: int = 2) -> str:
-    """`export_model(spring, ...)`, serialized to a JSON string."""
+    """`export_model(spring, ...)`, serialized to a JSON string. `spring` may
+    also be an inverse-design result -- see `export_model`."""
     return json.dumps(
         export_model(spring, include_results=include_results, profile_points=profile_points),
         indent=indent,
@@ -327,7 +348,8 @@ def model_from_json(text: str):
 
 
 def save_model(spring, path: str, include_results: bool = True, profile_points: int = 50, indent: int = 2) -> str:
-    """Write `spring` to `path` as JSON (see `export_model`). Returns `path`."""
+    """Write `spring` to `path` as JSON (see `export_model`; `spring` may
+    also be an inverse-design result). Returns `path`."""
     with open(path, "w") as f:
         f.write(model_to_json(spring, include_results=include_results, profile_points=profile_points, indent=indent))
     return path

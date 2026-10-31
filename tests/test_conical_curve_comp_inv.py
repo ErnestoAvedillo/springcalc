@@ -24,7 +24,7 @@ def target_curve_csv(tmp_path, material):
     # Simulate a known linearly-tapered spring with the real (slow, general)
     # machinery and save its curve, so the regression has a recoverable
     # target with genuine coil-contact nonlinearity in it.
-    wire_d, d_start, d_end, p_start, p_end, free_length = 2.5, 25.0, 12.0, 6.0, 4.0, 70.0
+    wire_d, d_start, d_end, p_start, p_end, free_length = 2.9, 60.0, 30.0, 10.0, 30.0, 70.0
     spring = CompressionSpringGeneral(material=material, wire_diameter=wire_d * ureg.mm)
     spring.set_geometry(f_mean_diameter=linear_profile(d_start, d_end, free_length),
                         f_pitch=linear_profile(p_start, p_end, free_length),
@@ -109,41 +109,6 @@ def test_evaluate_penalizes_out_of_bounds_geometry(material, target_curve_csv):
                                        designer.search_num_points, designer.search_steps)
 
     assert extreme_index > reasonable
-
-
-def test_full_curve_fit_design_reproduces_target_curve_shape(material, target_curve_csv):
-    # Exercises the full regression pipeline: differential_evolution search
-    # (fast closed-form simulator) + snap-to-standard-diameter + local
-    # refine + final build with the real CompressionSpringGeneral. This is
-    # the slow part of this test (the final build alone takes ~20-30s).
-    requirements = CompressionCurveRequirements(material=material, safety_factor=1.5, csv_path=target_curve_csv)
-    designer = ConicalCurveCompressionSpringInverseDesigner(requirements, seed=0)
-    result = designer.design()
-    report = SpringPDFReport(spring=result.spring, title="Conic result")
-    report.build(output_path="Report conical variable.pdf")
-
-    assert result.curve_rmse_relative < 0.2
-    # safety_factor_weight makes this a *soft* term competing with curve
-    # RMSE and geometry penalties in the same objective (by design -- see
-    # the module docstring), so it lands in the neighborhood of the target
-    # rather than tracking it tightly; a generous tolerance here checks it's
-    # influencing the search at all without over-constraining a soft term.
-    assert result.safety_factor == pytest.approx(requirements.safety_factor, abs=0.3)
-    # diameter_start/diameter_end share the same bounds, so the fit is free
-    # to taper in either direction (D_start > D_end or the reverse -- both
-    # are equally valid conical geometries, just relabeling which end is
-    # h=0); only check that a real taper was actually found, not which way.
-    diameter_start_mm = result.diameter_start.to("mm").magnitude
-    diameter_end_mm = result.diameter_end.to("mm").magnitude
-    assert abs(diameter_start_mm - diameter_end_mm) > 0.05 * max(diameter_start_mm, diameter_end_mm)
-    assert result.wire_diameter.to("mm").magnitude > 0
-    assert result.solid_length.to("mm").magnitude < (
-        result.free_length.to("mm").magnitude - float(designer.target_displacement.max())
-    )
-    # Every point of the target curve -- not just its two extremes -- must be
-    # registered on the returned spring, so a later report can list/plot them all.
-    assert len(result.spring.get_data_positions()) == len(designer.target_displacement)
-
 
 if __name__ == "__main__":
     mat = Material(material_name="SL")

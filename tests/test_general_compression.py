@@ -2,9 +2,7 @@ from springcalc.lineal.generic_compression import CompressionSpringGeneral
 from springcalc.lineal.animation import CompressionAnimator
 from springcalc import ureg
 from springcalc.pymodels.material import Material
-
-
-Quantity = ureg.Quantity
+from pint import Quantity
 
 
 def Diameter(diameter_init: Quantity,
@@ -38,31 +36,32 @@ def get_pitch(pitch_init: Quantity,
     else:
         return wire_diameter
 
-WIRE_DIAMETER = Quantity(2.9, 'mm')
+
+WIRE_DIAMETER = 2.9 * ureg.mm
 
 material = Material(material_name="DH")
 
 spring = CompressionSpringGeneral(material=material,
                                   wire_diameter=WIRE_DIAMETER,
-                                  free_length=Quantity(100, 'mm'),
+                                  free_length=100 * ureg.mm,
                                   nr_coils=10)
 
-FREE_LENGTH = Quantity(100, 'mm')
+FREE_LENGTH = 100 * ureg.mm
 
-spring.set_geometry(f_mean_diameter=lambda h: Diameter(diameter_init=Quantity(30, 'mm'),
-                                                       diameter_end=Quantity(60, 'mm'),
+spring.set_geometry(f_mean_diameter=lambda h: Diameter(diameter_init=30 * ureg.mm,
+                                                       diameter_end=60 * ureg.mm,
                                                        free_length=FREE_LENGTH,
                                                        h=h),
-                    f_pitch=lambda h: get_pitch(pitch_init=Quantity(10, 'mm'),
-                                                pitch_end=Quantity(20, 'mm'),
+                    f_pitch=lambda h: get_pitch(pitch_init=10 * ureg.mm,
+                                                pitch_end=20 * ureg.mm,
                                                 free_length=FREE_LENGTH,
                                                 h=h,
                                                 wire_diameter=WIRE_DIAMETER),
                     free_length=FREE_LENGTH)
-POSITION_START = FREE_LENGTH.to('mm').magnitude - Quantity(10, 'mm').to('mm').magnitude
-POSITION_END = Quantity(10, 'mm').to('mm').magnitude
+POSITION_START = FREE_LENGTH.to('mm').magnitude - 10
+POSITION_END = 10
 for position in range(POSITION_START, POSITION_END, -5):
-    spring.add_load_position(length=Quantity(position, 'mm'))
+    spring.add_load_position(length=position * ureg.mm)
 
 spring.get_forces_vs_position_graph(show=True)
 spring.get_3d_plot(num_points=500, show=True)

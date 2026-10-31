@@ -21,6 +21,12 @@ COMPRESSION = 1
 
 class CompressionSpringGeneral(VariableLinealSpring):
     solid_length: Quantity = 0.0 * ureg.mm
+    # Constant preload the spring already carries before any travel is
+    # counted (mirrors ExtensionSpring.initial_force). Zero by default, so
+    # existing callers see no change; set it when the spring's stated free
+    # length isn't truly unloaded -- e.g. an assembly preload, or a target
+    # curve whose displacement=0 point was measured at a nonzero load.
+    initial_force: Quantity = 0.0 * ureg.N
     positions: LinearPositionsTable = LinearPositionsTable()
     position_length: Optional[Quantity] = 0.0 * ureg.mm
     position_load: Optional[Quantity] = 0.0 * ureg.N
@@ -105,7 +111,7 @@ class CompressionSpringGeneral(VariableLinealSpring):
             deflection_history.to('mm').magnitude,
             force_history.to('N').magnitude,
         )
-        self.position_load = spring_class * force_n * ureg.N
+        self.position_load = spring_class * (force_n + self.initial_force.to('N').magnitude) * ureg.N
         self.calculate_stress_at_position(self.position_load)
         return self.position_load
 
@@ -259,7 +265,8 @@ class CompressionSpringGeneral(VariableLinealSpring):
         deflection_history, force_history, _ = self.simulate_progressive_compression(
             max_deflection=self.free_length, steps=self._LOAD_CURVE_STEPS,
         )
-        return deflection_history.to('mm').magnitude, force_history.to('N').magnitude
+        return (deflection_history.to('mm').magnitude,
+                force_history.to('N').magnitude + self.initial_force.to('N').magnitude)
 
     def get_forces_vs_position_graph(self, show=False):
         def _to_mm_float(value):

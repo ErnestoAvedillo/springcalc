@@ -236,6 +236,7 @@ class ConicalCurveInverseDesign:
     free_length: Quantity
     nr_coils: float
     solid_length: Quantity
+    pretension_load: Quantity
     safety_factor: float
     safety_factor_target: float
     curve_rmse: Quantity
@@ -277,6 +278,29 @@ class ConicalCurveCompressionSpringInverseDesigner:
                  seed: Optional[int] = None,
                  number_cycles: int = 1_000_000,
                  shot_peening: bool = False):
+        """Initialize the inverse designer with the given requirements and search parameters.
+
+        Args:
+            requirements (CompressionCurveRequirements): The target curve and material requirements.
+            type_of_end (str): The type of spring end.
+            spring_index_bounds (tuple): Bounds for the spring index.
+            wire_diameter_bounds (tuple): Bounds for the wire diameter.
+            diameter_bounds (tuple): Bounds for the spring diameter.
+            pitch_bounds (tuple): Bounds for the pitch.
+            free_length_margin (tuple): Margin for the free length.
+            min_coils (float): Minimum number of coils.
+            safety_factor_weight (float): Weight for the safety factor in the objective.
+            penalty_weight (float): Weight for the penalty in the objective.
+            search_num_points (int): Number of points for the search phase.
+            search_steps (int): Number of steps for the search phase.
+            final_num_points (int): Number of points for the final phase.
+            final_steps (int): Number of steps for the final phase.
+            maxiter (int): Maximum number of iterations for the optimizer.
+            popsize (int): Population size for the optimizer.
+            seed (Optional[int]): Random seed for reproducibility.
+            number_cycles (int): Number of load cycles for fatigue analysis.
+            shot_peening (bool): Whether the spring is shot peened.
+        """
         self.material = requirements.material
         self.safety_factor_target = requirements.safety_factor
         self.type_of_end = type_of_end
@@ -315,7 +339,13 @@ class ConicalCurveCompressionSpringInverseDesigner:
         diameter. Constructing one involves a materials lookup (surface
         finish factor etc.) that only depends on diameter, so caching avoids
         repeating it for every one of the many evaluations the optimizer
-        makes at the same candidate diameter."""
+        makes at the same candidate diameter.
+        Parameters:
+            wire_diameter_mm (float): The wire diameter in millimeters.
+
+        Returns:
+            GoodmanAnalyzer: The cached or newly created Goodman fatigue analyzer.
+        """
         # RMa lookup only depends on wire diameter; cache analyzers across
         # the (many) evaluations at the same diameter within one search.
         cached = self._analyzer_cache.get(wire_diameter_mm)
@@ -355,7 +385,20 @@ class ConicalCurveCompressionSpringInverseDesigner:
         length the target curve exercises. Each violation is squared so the
         penalty grows smoothly from zero at the boundary (as opposed to a
         hard reject), which keeps the objective differentiable-ish for
-        Nelder-Mead's local refinement step."""
+        Nelder-Mead's local refinement step.
+        Parameters:
+            wire_diameter_mm (float): The wire diameter in millimeters.
+            diameter_start_mm (float): The starting diameter of the spring in millimeters.
+            diameter_end_mm (float): The ending diameter of the spring in millimeters.
+            pitch_start_mm (float): The starting pitch of the spring in millimeters.
+            pitch_end_mm (float): The ending pitch of the spring in millimeters.
+            nr_coils (float): The number of coils in the spring.
+            solid_length_mm (float): The solid length of the spring in millimeters.
+            shortest_length_mm (float): The shortest length the target curve exercises in millimeters.
+
+        Returns:
+            float: The geometry penalty for the given spring parameters.
+        """
         c_lo, c_hi = self.spring_index_bounds
         penalty = 0.0
         for diameter_mm in (diameter_start_mm, diameter_end_mm):
@@ -376,7 +419,17 @@ class ConicalCurveCompressionSpringInverseDesigner:
         is better; any failure (e.g. an exception from a degenerate
         geometry) is scored as a large constant so the optimizer treats it
         as clearly worse than any successful evaluation, without crashing
-        the search."""
+        the search.
+        Parameters:
+            x (list): The candidate design variables [wire_diameter_mm, 
+            free_length_mm, diameter_start_mm, diameter_end_mm, pitch_start_mm,
+            pitch_end_mm].
+            num_points (int): The number of points for the search phase.
+            steps (int): The number of steps for the search phase.
+
+        Returns:
+            float: The objective function value for the given candidate design.
+        """
         wire_diameter_mm, free_length_mm, diameter_start_mm, diameter_end_mm, pitch_start_mm, pitch_end_mm = x
         try:
             deflection, force = _fast_progressive_compression(
@@ -386,6 +439,16 @@ class ConicalCurveCompressionSpringInverseDesigner:
             # points (curves may be discretized differently / have unequal
             # length) so the RMSE compares like-for-like.
             predicted_load = np.interp(self.target_displacement, deflection, force)
+            # The simulator always starts at force=0 at displacement=0, but a
+            # target curve measured with a preload (e.g. an assembly
+            # pretension, or displacement counted from something other than
+            # the true unloaded free length) won't. Rather than adding a 7th
+            # search dimension, the vertical offset that minimizes this
+            # candidate's SSE against the target has a closed form (the mean
+            # residual, like a regression intercept); clamped at 0 since a
+            # compression spring's preload can't be negative.
+            pretension_offset = max(float(np.mean(self.target_load - predicted_load)), 0.0)
+            predicted_load = predicted_load + pretension_offset
             rmse = float(np.sqrt(np.mean((predicted_load - self.target_load) ** 2)))
             norm_rmse = rmse / self._target_load_scale
 
@@ -396,8 +459,8 @@ class ConicalCurveCompressionSpringInverseDesigner:
             # position evaluates it (see module docstring).
             length_hi = free_length_mm - float(self.target_displacement.max())
             length_lo = free_length_mm - float(self.target_displacement.min())
-            load_hi = float(np.interp(self.target_displacement.max(), deflection, force))
-            load_lo = float(np.interp(self.target_displacement.min(), deflection, force))
+            load_hi = float(np.interp(self.target_displacement.max(), deflection, force)) + pretension_offset
+            load_lo = float(np.interp(self.target_displacement.min(), deflection, force)) + pretension_offset
             diameter_hi = diameter_start_mm + (diameter_end_mm - diameter_start_mm) * length_hi / free_length_mm
             diameter_lo = diameter_start_mm + (diameter_end_mm - diameter_start_mm) * length_lo / free_length_mm
             stress_hi = _shear_stress(diameter_hi, wire_diameter_mm, load_hi)
@@ -479,6 +542,15 @@ class ConicalCurveCompressionSpringInverseDesigner:
         predicted_load = np.interp(self.target_displacement,
                                    deflection_history.to('mm').magnitude,
                                    force_history.to('N').magnitude)
+        # Same closed-form preload fit as _evaluate, but against the final,
+        # real-machinery curve. Setting it on the spring itself (rather than
+        # just folding it into this method's own rmse/report) makes every
+        # downstream consumer -- add_load_position below, and anything the
+        # caller does with `spring` afterwards -- agree with the reported
+        # curve_rmse instead of silently ignoring the preload.
+        pretension_offset = max(float(np.mean(self.target_load - predicted_load)), 0.0)
+        spring.initial_force = pretension_offset * ureg.N
+        predicted_load = predicted_load + pretension_offset
         rmse = float(np.sqrt(np.mean((predicted_load - self.target_load) ** 2)))
         norm_rmse = rmse / self._target_load_scale
 
@@ -490,7 +562,9 @@ class ConicalCurveCompressionSpringInverseDesigner:
         # calculate_load_at_position always simulates with the same
         # (free_length, steps=500) key, so only the first call pays for the
         # simulation and the rest hit VariableLinealSpring's single-entry
-        # cache.
+        # cache. Loads/stresses it reports now include spring.initial_force,
+        # so they track the target CSV's own (pretensioned) values instead
+        # of the bare model curve.
         for displacement_mm in self.target_displacement:
             spring.add_load_position((free_length_mm - float(displacement_mm)) * ureg.mm)
         safety_factor = self._analyzer(wire_diameter_mm).calculate_safety_factor(
@@ -506,6 +580,7 @@ class ConicalCurveCompressionSpringInverseDesigner:
             free_length=spring.free_length,
             nr_coils=spring.nr_coils,
             solid_length=spring.calculate_solid_length(),
+            pretension_load=spring.initial_force,
             safety_factor=safety_factor,
             safety_factor_target=self.safety_factor_target,
             curve_rmse=rmse * ureg.N,
@@ -513,5 +588,5 @@ class ConicalCurveCompressionSpringInverseDesigner:
             target_displacement=self.target_displacement,
             target_load=self.target_load,
             simulated_displacement=deflection_history.to('mm').magnitude,
-            simulated_load=force_history.to('N').magnitude,
+            simulated_load=force_history.to('N').magnitude + pretension_offset,
         )
