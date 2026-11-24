@@ -6,7 +6,7 @@ from springcalc.report.geometry_export import (
     spring_geometry_to_csv,
     spring_geometry_profile,
 )
-from springcalc.report.step_export import spring_geometry_to_step
+from springcalc.report.step_export import spring_geometry_to_step, spring_centerline_points
 
 __all__ = [
     "SpringPDFReport",
@@ -16,4 +16,5 @@ __all__ = [
     "spring_geometry_to_csv",
     "spring_geometry_profile",
     "spring_geometry_to_step",
+    "spring_centerline_points",
 ]

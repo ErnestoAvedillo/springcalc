@@ -268,7 +268,36 @@ class CompressionSpringGeneral(VariableLinealSpring):
         return (deflection_history.to('mm').magnitude,
                 force_history.to('N').magnitude + self.initial_force.to('N').magnitude)
 
-    def get_forces_vs_position_graph(self, show=False):
+    @staticmethod
+    def _required_curve_arrays(required_curve):
+        """Normalize an optional (travel, load) requested curve to two float
+        arrays in mm/N. Plain numbers are taken as mm and N."""
+        if required_curve is None:
+            return None
+        travel, load = required_curve
+
+        def _as_array(values, unit):
+            if isinstance(values, Quantity):
+                return np.asarray(values.to(unit).magnitude, dtype=float)
+            return np.asarray([float(v.to(unit).magnitude) if isinstance(v, Quantity) else float(v)
+                               for v in values], dtype=float)
+
+        travel_mm, load_n = _as_array(travel, 'mm'), _as_array(load, 'N')
+        if travel_mm.shape != load_n.shape:
+            raise ValueError("required_curve travel and load must have the same length")
+        return travel_mm, load_n
+
+    def get_forces_vs_position_graph(self, show=False, required_curve=None):
+        """Load vs position curve from the progressive simulation.
+
+        Args:
+            required_curve: Optional (travel, load) pair with the loads the
+                spring is required to deliver (e.g. the target curve of an
+                inverse design). When given, those points are drawn in red
+                instead of the spring's own load positions, which are
+                computed from the spring itself and therefore always lie on
+                the curve.
+        """
         def _to_mm_float(value):
             return float(value.to('mm').magnitude) if isinstance(value, Quantity) else float(value)
 
@@ -276,17 +305,25 @@ class CompressionSpringGeneral(VariableLinealSpring):
             return float(value.to('N').magnitude) if isinstance(value, Quantity) else float(value)
 
         travel_mm, force_n = self._get_load_curve()
-        position_mm = self.free_length.to('mm').magnitude - travel_mm
+        free_length_mm = self.free_length.to('mm').magnitude
+        position_mm = free_length_mm - travel_mm
 
-        positions_table = self.positions.positions
-        marked_positions = [_to_mm_float(pc.position) for pc in positions_table]
-        marked_loads = [_to_n_float(pc.load) for pc in positions_table]
+        required = self._required_curve_arrays(required_curve)
         with interactive_backend(show):
             plt.figure()
-            plt.plot(position_mm, force_n)
-            if marked_positions:
-                plt.plot(marked_positions, marked_loads, 'o', color='tab:red', label='Load positions')
+            plt.plot(position_mm, force_n, label='Calculated load')
+            if required is not None:
+                req_travel_mm, req_load_n = required
+                plt.plot(free_length_mm - req_travel_mm, req_load_n, 'o', color='tab:red',
+                         label='Required load')
                 plt.legend()
+            else:
+                positions_table = self.positions.positions
+                marked_positions = [_to_mm_float(pc.position) for pc in positions_table]
+                marked_loads = [_to_n_float(pc.load) for pc in positions_table]
+                if marked_positions:
+                    plt.plot(marked_positions, marked_loads, 'o', color='tab:red', label='Load positions')
+                    plt.legend()
             plt.title('Load vs Position Curve')
             plt.xlabel('Position (mm)')
             plt.ylabel('Load (N)')
@@ -303,7 +340,9 @@ class CompressionSpringGeneral(VariableLinealSpring):
 
         return plot_data
 
-    def get_forces_vs_travel_graph(self, show=False):
+    def get_forces_vs_travel_graph(self, show=False, required_curve=None):
+        """Load vs travel curve from the progressive simulation. See
+        `get_forces_vs_position_graph` for `required_curve`."""
         def _to_mm_float(value):
             return float(value.to('mm').magnitude) if isinstance(value, Quantity) else float(value)
 
@@ -312,15 +351,21 @@ class CompressionSpringGeneral(VariableLinealSpring):
 
         travel_mm, force_n = self._get_load_curve()
 
-        positions_table = self.positions.positions
-        marked_travels = [_to_mm_float(pc.travel) for pc in positions_table]
-        marked_loads = [_to_n_float(pc.load) for pc in positions_table]
+        required = self._required_curve_arrays(required_curve)
         with interactive_backend(show):
             plt.figure()
-            plt.plot(travel_mm, force_n)
-            if marked_travels:
-                plt.plot(marked_travels, marked_loads, 'o', color='tab:red', label='Load positions')
+            plt.plot(travel_mm, force_n, label='Calculated load')
+            if required is not None:
+                req_travel_mm, req_load_n = required
+                plt.plot(req_travel_mm, req_load_n, 'o', color='tab:red', label='Required load')
                 plt.legend()
+            else:
+                positions_table = self.positions.positions
+                marked_travels = [_to_mm_float(pc.travel) for pc in positions_table]
+                marked_loads = [_to_n_float(pc.load) for pc in positions_table]
+                if marked_travels:
+                    plt.plot(marked_travels, marked_loads, 'o', color='tab:red', label='Load positions')
+                    plt.legend()
             plt.title('Load vs Travel Curve')
             plt.xlabel('Travel (mm)')
             plt.ylabel('Load (N)')

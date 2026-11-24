@@ -2772,32 +2772,18 @@ name = "springcalc"
 version = "0.1.24"
 source = { editable = "." }
 dependencies = [
-    { name = "build" },
     { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pandas" },
     { name = "pint" },
     { name = "pydantic" },
-    { name = "pypistats" },
-    { name = "pytest" },
     { name = "reportlab" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "twine" },
 ]
 
 [package.optional-dependencies]
-dev = [
-    { name = "flake8" },
-    { name = "flake8-pyproject" },
-    { name = "mypy" },
-    { name = "pytest" },
-]
-publish = [
-    { name = "build" },
-    { name = "twine" },
-]
 step = [
     { name = "cadquery" },
 ]
@@ -2805,29 +2791,41 @@ training = [
     { name = "scikit-learn" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "build" },
+    { name = "flake8" },
+    { name = "flake8-pyproject" },
+    { name = "mypy" },
+    { name = "pypistats" },
+    { name = "pytest" },
+    { name = "twine" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "build", specifier = ">=1.5.0" },
-    { name = "build", marker = "extra == 'publish'", specifier = ">=1.5.0" },
     { name = "cadquery", marker = "extra == 'step'", specifier = ">=2.8.0" },
-    { name = "flake8", marker = "extra == 'dev'", specifier = ">=7.0" },
-    { name = "flake8-pyproject", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "matplotlib", specifier = ">=3.11.1" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.3.1" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pint", specifier = ">=0.24" },
     { name = "pydantic", specifier = ">=2.13.4" },
-    { name = "pypistats", specifier = ">=1.14.0" },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "reportlab", specifier = ">=4.0" },
     { name = "scikit-learn", marker = "extra == 'training'", specifier = ">=1.5" },
     { name = "scipy", specifier = ">=1.14" },
-    { name = "twine", specifier = ">=7.0.0" },
-    { name = "twine", marker = "extra == 'publish'", specifier = ">=7.0.0" },
 ]
-provides-extras = ["dev", "publish", "training", "step"]
+provides-extras = ["training", "step"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "build", specifier = ">=1.5.0" },
+    { name = "flake8", specifier = ">=7.0" },
+    { name = "flake8-pyproject", specifier = ">=1.2" },
+    { name = "mypy", specifier = ">=2.3.1" },
+    { name = "pypistats", specifier = ">=1.14.0" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "twine", specifier = ">=7.0.0" },
+]
 
 [[package]]
 name = "termcolor"

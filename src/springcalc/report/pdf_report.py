@@ -11,6 +11,7 @@ import io
 from datetime import date
 from typing import Optional
 
+import numpy as np
 from pint import Quantity
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -92,11 +93,32 @@ class SpringPDFReport:
 
         report = SpringPDFReport(spring, title="Spring XYZ-123")
         report.build("spring_report.pdf")
+
+    `spring` may also be an inverse-design result that carries the spring
+    as `.spring` (e.g. `ConicalCurveInverseDesign`). If that result has a
+    target curve (`target_displacement`/`target_load`), the load graphs
+    show those required loads in red and the report adds a table comparing
+    them with the loads the spring actually delivers.
     """
 
     def __init__(self, spring: CompressionSpring, title: Optional[str] = None):
-        self.spring = spring
+        design = spring
+        self.spring = getattr(design, "spring", design)
         self.title = title or "Spring Calculation Report"
+        target_displacement = getattr(design, "target_displacement", None)
+        target_load = getattr(design, "target_load", None)
+        if target_displacement is not None and target_load is not None:
+            self.required_curve = (np.asarray(target_displacement, dtype=float),
+                                   np.asarray(target_load, dtype=float))
+        else:
+            self.required_curve = None
+        simulated_displacement = getattr(design, "simulated_displacement", None)
+        simulated_load = getattr(design, "simulated_load", None)
+        if simulated_displacement is not None and simulated_load is not None:
+            self._simulated_curve = (np.asarray(simulated_displacement, dtype=float),
+                                     np.asarray(simulated_load, dtype=float))
+        else:
+            self._simulated_curve = None
         self.styles = getSampleStyleSheet()
         self._section_style = ParagraphStyle(
             "SectionTitle", parent=self.styles["Heading2"], spaceBefore=12, spaceAfter=6,
@@ -159,6 +181,46 @@ class SpringPDFReport:
             Spacer(1, 6 * mm),
         ]
 
+    def _calculated_loads_at(self, travel_mm: np.ndarray) -> Optional[np.ndarray]:
+        """Loads the spring delivers at `travel_mm`, interpolated on its
+        simulated curve (from the design result if available, otherwise
+        from the spring's own progressive simulation)."""
+        curve = self._simulated_curve
+        if curve is None and hasattr(self.spring, "_get_load_curve"):
+            curve = self.spring._get_load_curve()
+        if curve is None:
+            return None
+        return np.interp(travel_mm, curve[0], curve[1])
+
+    def _build_required_vs_calculated_table(self):
+        if self.required_curve is None:
+            return []
+        travel_mm, required_n = self.required_curve
+        calculated_n = self._calculated_loads_at(travel_mm)
+        if calculated_n is None:
+            return []
+        rows = [["Travel (mm)", "Required load (N)", "Calculated load (N)", "Deviation (N)", "Deviation (%)"]]
+        for travel, required, calculated in zip(travel_mm, required_n, calculated_n):
+            deviation = calculated - required
+            deviation_pct = _fmt(100 * deviation / required, 1) if required else "-"
+            rows.append([
+                _fmt(travel, 2),
+                _fmt(required, 1),
+                _fmt(calculated, 1),
+                _fmt(deviation, 1),
+                deviation_pct,
+            ])
+        rmse = float(np.sqrt(np.mean((calculated_n - required_n) ** 2)))
+        table = self._styled_table(rows, col_widths=[32 * mm] * 5)
+        table.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+        return [
+            Paragraph("Required vs. calculated load", self._section_style),
+            Paragraph(f"RMS deviation: {_fmt(rmse, 2)} N", self.styles["Normal"]),
+            Spacer(1, 3 * mm),
+            table,
+            Spacer(1, 6 * mm),
+        ]
+
     def _build_3d_section(self):
         elements = [Paragraph("3D isometric view", self._section_style)]
         try:
@@ -178,9 +240,13 @@ class SpringPDFReport:
             ("Load vs. travel", self.spring.get_forces_vs_travel_graph),
             ("Outer diameter vs. position", self.spring.get_diameter_vs_position_graph),
         ]
+        load_graphs = {self.spring.get_forces_vs_position_graph, self.spring.get_forces_vs_travel_graph}
         for label, method in graph_calls:
             try:
-                image_b64 = method(show=False)
+                if self.required_curve is not None and method in load_graphs:
+                    image_b64 = method(show=False, required_curve=self.required_curve)
+                else:
+                    image_b64 = method(show=False)
             except Exception as exc:
                 elements.append(Paragraph(
                     f"{label}: could not be generated ({exc})", self.styles["Normal"]))
@@ -234,6 +300,10 @@ class SpringPDFReport:
         story.append(PageBreak())
         story += self._build_graphs()
         story.append(PageBreak())
+        required_table = self._build_required_vs_calculated_table()
+        if required_table:
+            story += required_table
+            story.append(PageBreak())
         story += self._build_positions_table()
         story += self._build_goodman_section()
         doc.build(story)

@@ -32,6 +32,7 @@ from springcalc.report import (
     spring_geometry_to_csv,
     spring_geometry_profile,
     spring_geometry_to_step,
+    spring_centerline_points,
 )
 from springcalc.pymodels.units import ureg
 from springcalc.lineal.plotting import interactive_backend
@@ -83,6 +84,7 @@ __all__ = [
     "spring_geometry_to_csv",
     "spring_geometry_profile",
     "spring_geometry_to_step",
+    "spring_centerline_points",
     "ureg",
     "interactive_backend",
     "export_model",

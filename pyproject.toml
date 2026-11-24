@@ -20,30 +20,16 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "build>=1.5.0",
     "matplotlib>=3.11.1",
     "numpy>=2.0",
     "pandas>=2.2",
     "pint>=0.24",
     "pydantic>=2.13.4",
-    "pypistats>=1.14.0",
-    "pytest>=9.1.1",
     "reportlab>=4.0",
     "scipy>=1.14",
-    "twine>=7.0.0",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "flake8>=7.0",
-    "flake8-pyproject>=1.2",
-    "mypy>=2.3.1",
-]
-publish = [
-    "build>=1.5.0",
-    "twine>=7.0.0",
-]
 # Only needed to run scripts/regresiones/*, which regenerate the plain-number
 # JSON coefficients shipped in the package. Not required at runtime.
 training = [
@@ -53,10 +39,24 @@ step = [
     "cadquery>=2.8.0",
 ]
 
+# Development-only tools (tests, linting, packaging). uv installs the "dev"
+# group automatically for `uv run`/`uv sync`; it is never installed for
+# users who `pip install springcalc`.
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "flake8>=7.0",
+    "flake8-pyproject>=1.2",
+    "mypy>=2.3.1",
+    "build>=1.5.0",
+    "twine>=7.0.0",
+    "pypistats>=1.14.0",
+]
+
 [project.urls]
-Homepage = "https://github.com/ErnestoAvedillo/pysprings"
-Repository = "https://github.com/ErnestoAvedillo/pysprings"
-Issues = "https://github.com/ErnestoAvedillo/pysprings/issues"
+Homepage = "https://github.com/ErnestoAvedillo/springcalc"
+Repository = "https://github.com/ErnestoAvedillo/springcalc"
+Issues = "https://github.com/ErnestoAvedillo/springcalc/issues"
 
 [build-system]
 requires = ["hatchling"]

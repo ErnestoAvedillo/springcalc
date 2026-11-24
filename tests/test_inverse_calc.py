@@ -4,9 +4,24 @@ from springcalc.inverse_calc.conical_curve_comp_inv import ConicalCurveCompressi
 from springcalc.report.pdf_report import SpringPDFReport
 from springcalc.pymodels.material import Material
 from springcalc.persistence import save_model, load_model
+from pathlib import Path
+
 import pytest
 
-def test_full_curve_fit_design_reproduces_target_curve_shape(material, target_curve_csv):
+DATA_CSV = Path(__file__).parent / "data.csv"
+
+
+@pytest.fixture
+def material():
+    return Material(material_name="DH")
+
+
+@pytest.fixture
+def target_curve_csv():
+    return str(DATA_CSV)
+
+
+def test_full_curve_fit_design_reproduces_target_curve_shape(material, target_curve_csv, tmp_path):
     # Exercises the full regression pipeline: differential_evolution search
     # (fast closed-form simulator) + snap-to-standard-diameter + local
     # refine + final build with the real CompressionSpringGeneral. This is
@@ -15,11 +30,11 @@ def test_full_curve_fit_design_reproduces_target_curve_shape(material, target_cu
     designer = ConicalCurveCompressionSpringInverseDesigner(requirements, seed=0)
     result = designer.design()
     report = SpringPDFReport(spring=result.spring, title="Conic result")
-    report.build(output_path="Report conical variable.pdf")
-    save_model(result, "conical_result.json", include_results=True, profile_points=50)
-    loaded_spring = load_model("conical_result.json")
+    report.build(output_path=str(tmp_path / "Report conical variable.pdf"))
+    save_model(result, str(tmp_path / "conical_result.json"), include_results=True, profile_points=50)
+    loaded_spring = load_model(str(tmp_path / "conical_result.json"))
     report = SpringPDFReport(spring=loaded_spring, title="Loaded Conic result")
-    report.build(output_path="Loaded Report conical variable.pdf")
+    report.build(output_path=str(tmp_path / "Loaded Report conical variable.pdf"))
     assert result.curve_rmse_relative < 0.2
     # safety_factor_weight makes this a *soft* term competing with curve
     # RMSE and geometry penalties in the same objective (by design -- see
@@ -44,7 +59,7 @@ def test_full_curve_fit_design_reproduces_target_curve_shape(material, target_cu
 
 
 if __name__ == "__main__":
-    mat = Material(material_name="DH")
-    target_curve_csv = "tests/data.csv"  # Replace with the actual path to your CSV file
-    test_full_curve_fit_design_reproduces_target_curve_shape(mat, target_curve_csv)
+    import tempfile
+    test_full_curve_fit_design_reproduces_target_curve_shape(
+        Material(material_name="DH"), str(DATA_CSV), Path(tempfile.mkdtemp()))
     print("All conical_curve_comp_inv_claude fast-path tests passed.")

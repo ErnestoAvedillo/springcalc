@@ -227,9 +227,27 @@ class ExtensionSpring(LinealSpring):
                      pitch=None,
                      free_length=None):
 
-        self.free_length = nr_coils * pitch
+        """Set the coil count and pitch, and the free length between hooks.
+
+        The coil body is ``nr_coils * pitch`` long; ``free_length`` is the
+        unloaded length between hooks, which also includes the hooks, so it
+        is independent of the body. When omitted it defaults to the body
+        length (hooks of negligible length). It cannot be shorter than the
+        body.
+        """
+        if nr_coils is None or pitch is None:
+            raise ValueError("nr_coils and pitch are required")
         self.nr_coils = nr_coils
         self.pitch = pitch
+        body_length = self.nr_coils * self.pitch
+        if free_length is None:
+            self.free_length = body_length
+        else:
+            self.free_length = free_length
+            if self.free_length < body_length:
+                raise ValueError(
+                    f"free_length ({self.free_length}) cannot be shorter than the coil body "
+                    f"nr_coils * pitch ({body_length})")
         self.length_btw_hooks = self.free_length
 
         self.calculate_active_coils()
