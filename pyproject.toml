@@ -62,13 +62,18 @@ Issues = "https://github.com/ErnestoAvedillo/springcalc/issues"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+# JSON files are matched by the repo-wide *.json rule in .gitignore, so the
+# coefficients file must be force-included even though it is tracked in git.
+# This is set for every target (not just the wheel): `python -m build` builds
+# the wheel *from the sdist*, so a file missing from the sdist is also
+# missing from the wheel (that is how 0.1.25 shipped without it).
+artifacts = ["src/springcalc/regresiones/factor_f/factor_f_coeffs.json"]
+
 [tool.hatch.build.targets.wheel]
 # src-layout: the importable package lives at src/springcalc.
-# CSV material tables are bundled automatically. JSON files are matched by the
-# repo-wide *.json rule in .gitignore, so they must be force-included here even
-# though factor_f_coeffs.json is tracked in git.
+# CSV material tables are bundled automatically.
 packages = ["src/springcalc"]
-artifacts = ["src/springcalc/regresiones/factor_f/factor_f_coeffs.json"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
