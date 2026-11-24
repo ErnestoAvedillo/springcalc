@@ -253,6 +253,47 @@ class ConicalCurveInverseDesign:
         return self.safety_factor - self.safety_factor_target
 
 
+# Objective value given to a candidate whose solid length exceeds the
+# requested maximum: far above any feasible design's score (normalized RMSE +
+# safety-factor error + soft penalties), but below the 1e6 used for failed
+# evaluations, and growing with the excess so the optimizer is still steered
+# back towards the feasible region rather than seeing a flat plateau.
+_SOLID_LENGTH_VIOLATION_BASE = 1e4
+
+
+def _optional_mm(value) -> Optional[float]:
+    """None stays None; a Quantity is converted to mm; a number is taken as mm."""
+    if value is None:
+        return None
+    if isinstance(value, Quantity):
+        return float(value.to('mm').magnitude)
+    return float(value)
+
+
+def _solid_length_violation(solid_length_mm: float, max_solid_length_mm: Optional[float]) -> Optional[float]:
+    """Objective value for a candidate breaking the max solid length
+    constraint, or None if it satisfies it (or there is no limit)."""
+    if max_solid_length_mm is None or solid_length_mm <= max_solid_length_mm:
+        return None
+    return _SOLID_LENGTH_VIOLATION_BASE + (solid_length_mm - max_solid_length_mm)
+
+
+def check_max_solid_length(spring, max_solid_length_mm: Optional[float]) -> None:
+    """Raise ValueError if the final, real spring's solid length exceeds
+    the requested maximum (e.g. because snapping the wire to a standard
+    diameter pushed it over, or no feasible geometry exists within the
+    other bounds)."""
+    if max_solid_length_mm is None:
+        return
+    solid_length_mm = float(spring.calculate_solid_length().to('mm').magnitude)
+    if solid_length_mm > max_solid_length_mm + 1e-9:
+        raise ValueError(
+            f"No design found with solid length <= {max_solid_length_mm:.3f} mm: the best "
+            f"design has a solid length of {solid_length_mm:.3f} mm. Relax max_solid_length "
+            f"or widen the other bounds (wire_diameter_bounds, diameter_bounds, pitch_bounds, "
+            f"free_length_margin).")
+
+
 class ConicalCurveCompressionSpringInverseDesigner:
     """Fit a linearly-tapered (diameter and pitch) compression spring's wire
     diameter, free length, and diameter/pitch profile to a full target
@@ -277,7 +318,8 @@ class ConicalCurveCompressionSpringInverseDesigner:
                  popsize: int = 15,
                  seed: Optional[int] = None,
                  number_cycles: int = 1_000_000,
-                 shot_peening: bool = False):
+                 shot_peening: bool = False,
+                 max_solid_length=None):
         """Initialize the inverse designer with the given requirements and search parameters.
 
         Args:
@@ -300,7 +342,13 @@ class ConicalCurveCompressionSpringInverseDesigner:
             seed (Optional[int]): Random seed for reproducibility.
             number_cycles (int): Number of load cycles for fatigue analysis.
             shot_peening (bool): Whether the spring is shot peened.
+            max_solid_length (Quantity | float | None): Maximum allowed solid
+                length (a `Quantity`, or a plain number in mm). A hard
+                constraint: candidates exceeding it are rejected during the
+                search, and `design()` raises ValueError if the final spring
+                still exceeds it. None (default) means no limit.
         """
+        self.max_solid_length_mm = _optional_mm(max_solid_length)
         self.material = requirements.material
         self.safety_factor_target = requirements.safety_factor
         self.type_of_end = type_of_end
@@ -472,6 +520,9 @@ class ConicalCurveCompressionSpringInverseDesigner:
             diameter_spread = abs(diameter_start_mm - diameter_end_mm)
             fully_telescoped = diameter_spread >= nr_coils * wire_diameter_mm
             solid_length_mm = wire_diameter_mm if fully_telescoped else nr_coils * wire_diameter_mm
+            violation = _solid_length_violation(solid_length_mm, self.max_solid_length_mm)
+            if violation is not None:
+                return violation
             penalty = self._geometry_penalty(wire_diameter_mm, diameter_start_mm, diameter_end_mm,
                                              pitch_start_mm, pitch_end_mm, nr_coils,
                                              solid_length_mm, length_hi)
@@ -537,6 +588,7 @@ class ConicalCurveCompressionSpringInverseDesigner:
         spring = self._build_spring(wire_diameter_mm, diameter_start_mm, diameter_end_mm,
                                     pitch_start_mm, pitch_end_mm, free_length_mm)
         spring.calculate_spring_properties(num_points=self.final_num_points)
+        check_max_solid_length(spring, self.max_solid_length_mm)
         deflection_history, force_history, _ = spring.simulate_progressive_compression(
             max_deflection=free_length_mm * ureg.mm, steps=self.final_steps, num_points=self.final_num_points)
         predicted_load = np.interp(self.target_displacement,

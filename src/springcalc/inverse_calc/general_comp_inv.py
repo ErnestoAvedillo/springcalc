@@ -53,6 +53,7 @@ from scipy.interpolate import PchipInterpolator
 from scipy.optimize import differential_evolution, minimize
 
 from .conical_curve_comp_inv import CompressionCurveRequirements, load_target_curve
+from .conical_curve_comp_inv import _optional_mm, _solid_length_violation, check_max_solid_length
 from .lineal_comp_inv import _shear_stress
 from ..lineal.constants import COMPRESSION_SPRING_END_TYPES
 from ..lineal.constants import OPEN_GROUND
@@ -154,9 +155,15 @@ class GeneralCompressionSpringInverseDesigner:
                  seed: Optional[int] = None,
                  workers: int = 1,
                  number_cycles: int = 1_000_000,
-                 shot_peening: bool = False):
+                 shot_peening: bool = False,
+                 max_solid_length=None):
+        """`max_solid_length` (a `Quantity`, or a plain number in mm) is a
+        hard upper limit on the solid length: candidates exceeding it are
+        rejected during the search, and `design()` raises ValueError if the
+        final spring still exceeds it. None (default) means no limit."""
         if num_control_points < 2:
             raise ValueError("num_control_points must be at least 2")
+        self.max_solid_length_mm = _optional_mm(max_solid_length)
         self.material = requirements.material
         self.safety_factor_target = requirements.safety_factor
         self.type_of_end = type_of_end
@@ -263,6 +270,9 @@ class GeneralCompressionSpringInverseDesigner:
             diameter_spread_mm = float(diameter_control_mm.max() - diameter_control_mm.min())
             fully_telescoped = diameter_spread_mm >= nr_coils * wire_diameter_mm
             solid_length_mm = wire_diameter_mm if fully_telescoped else nr_coils * wire_diameter_mm
+            violation = _solid_length_violation(solid_length_mm, self.max_solid_length_mm)
+            if violation is not None:
+                return violation
             length_hi = free_length_mm - float(self.target_displacement.max())
             penalty = self._geometry_penalty(wire_diameter_mm, diameter_control_mm, pitch_control_mm,
                                              nr_coils, solid_length_mm, length_hi)
@@ -377,6 +387,7 @@ class GeneralCompressionSpringInverseDesigner:
         # evaluations.
         spring = self._build_spring(wire_diameter_mm, free_length_mm, diameter_control_mm, pitch_control_mm)
         spring.calculate_spring_properties(num_points=self.final_num_points)
+        check_max_solid_length(spring, self.max_solid_length_mm)
         deflection_history, force_history, _ = spring.simulate_progressive_compression(
             max_deflection=free_length_mm * ureg.mm, steps=self.final_steps, num_points=self.final_num_points)
         predicted_load = np.interp(self.target_displacement,
